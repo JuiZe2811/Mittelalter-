@@ -1,62 +1,57 @@
-# Burg-Abwehr (Mittelalter) – Neuanfang
+# Burg-Abwehr (Mittelalter) – Grundgerüst
 
-Ein Mittelalter-Spiel für die Meta Quest 3 (WebXR mit Passthrough).
-Das Grundgerüst stammt aus dem Projekt **VrSpiel**. Alle Spielinhalte sind entfernt, damit wir sie neu bauen können.
+Ein Mittelalter-Spiel für die Meta Quest 3 (WebXR mit Passthrough). Das ist ein kompletter Neuanfang.
+Bisher gibt es nur die Map und Skelette, die durch Türen und Fenster hereinkommen.
+Waffen und alles Weitere bauen wir als Nächstes.
 
 Starten: `index.html` über einen Webserver öffnen, z. B. über GitHub Pages oder lokal mit `python3 -m http.server`.
 
-## Was übernommen wurde
+## Was das Spiel kann
 
-- **Raum einrichten:**
-  - Wände, Türen und Fenster mit dem Laser einzeichnen
-  - Tische und Stühle aufziehen
-  - Bodenhöhe einstellen
-  - Flächen löschen, letzten Schritt rückgängig machen
-  - Raum aus der Quest-Raumeinrichtung übernehmen
-  - 5 Speicherplätze für Räume
-  - Ausrichten: eine geladene Karte an die echten Wände anlegen
-- **Türen und Fenster:** dunkler Flur mit Flackerlicht hinter Türen, Nachthimmel mit Blitz und Donner hinter Fenstern
-- **Physik:** cannon-es; echte Wände und Möbel sind feste Körper
-- **Greifen und Werfen:**
-  - Gegenstände greifen: Griff-Taste
-  - aus der Ferne heranziehen: Laser + Griff-Taste
-  - werfen: loslassen
-  - Zum Testen gibt es Holzkisten.
-- **Menü:**
-  - Hauptmenü
-  - Einstellungen: Ton, Bedienung, Grafik
-  - Pause-Menü: Stick drücken oder B/Y, am PC Esc
-- **Technik:**
-  - Schatten
-  - Staub in der Luft
-  - Leistungsprofile
-  - automatische Anpassung, wenn es ruckelt
-  - Bildrate 72, 90 oder 120 Hz
-  - Fehler werden abgefangen, das Spiel läuft weiter
-- **PC-Test ohne Brille:**
-  - umschauen: rechte Maus ziehen
-  - gehen: WASD
-  - Kiste greifen, nochmal klicken = werfen: Linksklick
-  - Testkiste erzeugen: C
+**Map einrichten (mit dem Laser):**
+- Wände, Türen und Fenster einzeichnen
+- Tische und Stühle einzeichnen
+- Bodenhöhe einstellen
+- Flächen löschen, letzten Schritt rückgängig machen
+- Raum aus der Quest-Raumeinrichtung übernehmen
+- 5 Speicherplätze für Räume
+- Ausrichten: eine geladene Karte an die echten Wände anlegen
 
-## Was entfernt wurde
+**Stimmung:** Hinter Türen liegt ein dunkler Flur mit Flackerlicht, hinter Fenstern ein Nachthimmel mit Blitz und Donner.
 
-Alle Waffen, Schilde, Bögen, Dolche und Brandbomben, außerdem:
+**Skelette:**
+- Sie erscheinen draußen und kommen von dort herein:
+  - Durch Türen laufen sie hindurch.
+  - Durch Fenster klettern sie über die Brüstung.
+- Im Raum laufen sie um Wände, Tische und Stühle herum zum Spieler.
+- Es sind höchstens 6 Skelette gleichzeitig unterwegs.
+- Sind keine Türen oder Fenster eingezeichnet, steigen sie aus dem Boden.
+- Noch harmlos, weil es keine Waffen gibt: Beim Spieler holen sie aus und zerfallen nach 12 Sekunden.
 
-- Tränke und Automaten, Schmiede, Schatztruhe, Wandkäufe, Fallen
-- Gegner (Skelette, Troll, Boss) mit ihren 3D-Modellen
-- Wellen, Punkte, Bestenliste, Bretter an Türen und Fenstern
+**Menü:**
+- Hauptmenü: START, Raum einrichten, Einstellungen
+- Einstellungen: Ton, Bedienung, Grafik
+- Pause: Stick drücken oder B/Y, am PC Esc
 
-Ältere gespeicherte Räume aus dem Hauptspiel lassen sich weiter laden. Wandkauf-, Automaten- und Kisten-Plätze darin werden übersprungen.
+**PC-Test ohne Brille:**
+- umschauen: rechte Maus ziehen
+- gehen: WASD
+- Menü und Raum-Werkzeuge: Linksklick
+- starten: Enter
 
 ## Dateien
 
 | Datei | Inhalt |
 |---|---|
-| `js/main.js` | Grundgerüst: Hände, Greifen, Raum-Einrichtung, Menü, Einstellungen, Pause, Hauptschleife |
+| `js/main.js` | Hände/Laser, Raum-Einrichtung, Menü, Einstellungen, Pause, Hauptschleife |
 | `js/room.js` | Raum-Modell: Wände, Türen, Fenster, Tische, Stühle; Speichern und Laden |
-| `js/physics.js` | Physik-Welt (cannon-es) |
-| `js/effects.js` | Partikel, schwebende Texte, Trümmer, Flecken |
-| `js/sfx.js` | Synthetische Geräusche und Musik (Web Audio, keine Audiodateien) |
-| `js/util.js` | Text-Panels, Materialien, Geometrie-Hilfen |
-| `tools/version.py` | Versionsnummer setzen, damit der Browser keine alten Dateien nutzt: `python3 tools/version.py 4` |
+| `js/enemies.js` | Skelette: Aussehen, Erscheinen an Türen/Fenstern, Laufen, Klettern, Animation |
+| `js/nav.js` | Laufwege: Raster über dem Raum und A*-Wegsuche |
+| `js/physics.js` | Physik-Welt (cannon-es); Wände und Möbel sind feste Körper |
+| `js/effects.js` | Partikel, schwebende Texte, Trümmer |
+| `js/sfx.js` | Synthetische Geräusche (Web Audio, keine Audiodateien) |
+| `js/util.js` | Text-Panels und Hilfsfunktionen |
+| `tools/version.py` | Versionsnummer setzen, damit der Browser keine alten Dateien nutzt: `python3 tools/version.py 5` |
+
+Räume, die im alten Spiel (VrSpiel) gespeichert wurden, lassen sich laden.
+Wandkauf-, Automaten- und Kistenplätze darin werden übersprungen.

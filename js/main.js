@@ -1,19 +1,20 @@
 import * as THREE from 'three';
-import { VERSION } from './version.js?v=3';
+import { VERSION } from './version.js?v=4';
 import { ARButton } from 'three/addons/webxr/ARButton.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { makePanel, panelBg, roundRect } from './util.js?v=3';
-import { SFX, ensureAudio, setListener, setVolumes, setAudioPaused } from './sfx.js?v=3';
-import { addDynamic, removeDynamic, localBoxOf, stepPhysics, dynamics } from './physics.js?v=3';
-import { room, addWall, addBox, makeWall, makeBox, rotateBox, removeSurface, clearRoom, setEditMode, suggestYaw, surfacesOf, importDetectedPlanes, saveRoom, loadRoom, hasSavedRoom, surfaceName, serializeRoom, deserializeRoom, roomSlots, saveRoomSlot, loadRoomSlot, addOpening, makeOpening, roomOccluders, setAtmosphere, closeRoomGaps, closeRoom, openWallEnds } from './room.js?v=3';
-import { initEffects, headRef, floatingText, updateEffects, addDebris, updateDebris, fx, clearDebris, puff } from './effects.js?v=3';
+import { makePanel, panelBg, roundRect } from './util.js?v=4';
+import { SFX, ensureAudio, setListener, setVolumes, setAudioPaused } from './sfx.js?v=4';
+import { stepPhysics } from './physics.js?v=4';
+import { initEnemies, spawnEnemy, updateEnemies, clearEnemies, prepareNav, aliveCount, enemies } from './enemies.js?v=4';
+import { room, addWall, addBox, makeWall, makeBox, rotateBox, removeSurface, clearRoom, setEditMode, suggestYaw, surfacesOf, importDetectedPlanes, saveRoom, loadRoom, hasSavedRoom, surfaceName, serializeRoom, deserializeRoom, roomSlots, saveRoomSlot, loadRoomSlot, addOpening, makeOpening, roomOccluders, setAtmosphere, closeRoomGaps, closeRoom, openWallEnds } from './room.js?v=4';
+import { initEffects, headRef, floatingText, updateEffects, updateDebris, fx, clearDebris } from './effects.js?v=4';
 const hyp = (a, b, c = 0) => Math.sqrt(a * a + b * b + c * c); // schneller als Math.hypot und ohne Speicher-Müll
 
 // =============================================================================
 // Grundgerüst – Burg-Abwehr (Neuanfang)
 // Enthalten: Raum-Einrichtung (Wände, Türen, Fenster, Möbel, Bodenhöhe, Räume speichern/laden,
-// Ausrichten, Quest-Raum), Physik, Greifen & Werfen, Menü, Einstellungen, Pause.
-// Waffen, Gegner, Tränke, Shop usw. kommen neu dazu.
+// Ausrichten, Quest-Raum), Menü, Einstellungen, Pause und Skelette, die durch Türen & Fenster kommen.
+// Waffen usw. kommen als Nächstes.
 // =============================================================================
 const HOLD_OFFSET = new THREE.Matrix4().makeTranslation(0, -0.045, 0.015); // Handmitte relativ zum Controller
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -33,6 +34,7 @@ const envTex = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(
 scene.environment = envTex;
 scene.add(room.group);
 initEffects(scene);
+initEnemies(scene);
 
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 200);
 camera.position.set(0, 1.6, 0);
@@ -66,7 +68,6 @@ function setShadows(on) {
   shadowFloor.visible = on;
   try { localStorage.setItem('vrspiel-schatten', String(on)); } catch { /* ignorieren */ }
 }
-const castShadows = (o) => o.traverse(m => { if (m.isMesh && !m.material.transparent) m.castShadow = true; });
 const desktopFloor = new THREE.GridHelper(40, 40, 0x666666, 0x444444);
 scene.add(desktopFloor);
 
@@ -119,11 +120,10 @@ const hands = [0, 1].map(i => {
   scene.add(ray);
   const h = {
     i, ray, src: null, handedness: i === 0 ? 'left' : 'right', btn: {}, prev: {}, stickX: 0, stickY: 0,
-    held: null, hist: [], vel: new THREE.Vector3(), angVel: new THREE.Vector3(),
-    point: new THREE.Vector3(), tip: new THREE.Vector3(), quat: new THREE.Quaternion(), uiHover: null, pull: null
+    point: new THREE.Vector3(), tip: new THREE.Vector3(), quat: new THREE.Quaternion(), uiHover: null
   };
   ray.addEventListener('connected', (e) => { h.src = e.data; h.handedness = e.data.handedness; });
-  ray.addEventListener('disconnected', () => { releaseHand(h); h.src = null; });
+  ray.addEventListener('disconnected', () => { h.src = null; });
   const ptr = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, -1)]),
     new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55 }));
   ptr.visible = false;
@@ -149,18 +149,6 @@ function readInputs() {
     handPoint(h, h.point);
     h.tip.setFromMatrixPosition(h.ray.matrixWorld);
     h.ray.getWorldQuaternion(h.quat);
-    // Geschwindigkeit + Drehgeschwindigkeit (für Würfe)
-    h.hist.push({ p: h.point.clone(), q: h.quat.clone(), t: elapsed });
-    while (h.hist.length > 2 && elapsed - h.hist[0].t > 0.08) h.hist.shift();
-    const a = h.hist[0], b = h.hist[h.hist.length - 1], dt = b.t - a.t;
-    if (dt > 0.001) {
-      h.vel.copy(b.p).sub(a.p).divideScalar(dt);
-      const dq = b.q.clone().multiply(a.q.clone().invert());
-      if (dq.w < 0) { dq.x *= -1; dq.y *= -1; dq.z *= -1; dq.w *= -1; }
-      const angle = 2 * Math.acos(Math.min(1, dq.w)), s = Math.sqrt(1 - dq.w * dq.w);
-      if (s > 1e-4) h.angVel.set(dq.x / s, dq.y / s, dq.z / s).multiplyScalar(angle / dt);
-      else h.angVel.set(0, 0, 0);
-    }
   }
 }
 const down = (h, k) => h.btn[k] && !h.prev[k];
@@ -169,95 +157,13 @@ function pulse(h, intensity, ms) {
   const act = h && h.src && h.src.gamepad && h.src.gamepad.hapticActuators && h.src.gamepad.hapticActuators[0];
   if (act && act.pulse && settings.haptics > 0) act.pulse(Math.min(1, intensity * settings.haptics), ms);
 }
-const isFree = (h) => !h.held && !h.pull;
 // Hand (Controller) als Drehung um die Hochachse
 function handYaw(h) {
   tmpV.set(0, 0, -1).applyQuaternion(h.quat);
   return Math.atan2(-tmpV.x, -tmpV.z);
 }
 
-// =============================================================================
-// Physik-Gegenstände: greifen, halten, werfen (Grundlage für spätere Waffen & Dinge)
-// =============================================================================
-const props = []; // { obj, mass, phys, holder }
-const crateTex = (() => {
-  const c = document.createElement('canvas');
-  c.width = c.height = 128;
-  const g = c.getContext('2d');
-  g.fillStyle = '#8a5a2b'; g.fillRect(0, 0, 128, 128);
-  for (let i = 0; i < 4; i++) { g.fillStyle = i % 2 ? '#7a4e24' : '#94632f'; g.fillRect(0, i * 32, 128, 30); }
-  g.strokeStyle = '#4a2e12'; g.lineWidth = 10; g.strokeRect(5, 5, 118, 118);
-  g.beginPath(); g.moveTo(8, 8); g.lineTo(120, 120); g.stroke();
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  return t;
-})();
-// Holzkiste zum Testen der Physik
-function spawnCrate(pos, size = 0.25) {
-  const obj = new THREE.Mesh(new THREE.BoxGeometry(size, size, size), new THREE.MeshStandardMaterial({ map: crateTex, roughness: 0.85 }));
-  obj.position.copy(pos);
-  obj.rotation.y = Math.random() * Math.PI;
-  castShadows(obj);
-  scene.add(obj);
-  const p = { obj, mass: 1.5, phys: null, holder: null };
-  makeLoose(p);
-  props.push(p);
-  return p;
-}
-function makeLoose(p, vel = null, angVel = null) {
-  if (p.obj.parent !== scene) scene.attach(p.obj);
-  p.holder = null;
-  p.phys = addDynamic(p.obj, localBoxOf(p.obj), p.mass, {
-    vel, angVel,
-    onImpact: (v) => SFX.thunk && SFX.thunk(Math.min(1, v / 6)),
-    onLost: () => { removeDynamic(p.phys); p.phys = null; p.obj.position.set(headPos.x, 1.2, headPos.z - 0.5); makeLoose(p); }
-  });
-}
-function grabProp(p, h) {
-  if (p.holder) releaseHand(p.holder);
-  if (p.phys) { removeDynamic(p.phys); p.phys = null; }
-  h.ray.attach(p.obj);
-  p.holder = h;
-  h.held = { type: 'prop', p };
-  SFX.grab();
-  pulse(h, 0.4, 30);
-}
-function clearProps() {
-  for (const p of props.splice(0)) {
-    if (p.holder) p.holder.held = null;
-    if (p.phys) removeDynamic(p.phys);
-    if (p.obj.parent) p.obj.parent.remove(p.obj);
-    p.obj.geometry.dispose();
-  }
-}
-function grabCandidates(h) {
-  const list = [];
-  for (const p of props) {
-    if (p.holder) continue;
-    const d = new THREE.Box3().setFromObject(p.obj).distanceToPoint(h.point);
-    if (d < 0.06) list.push({ d, p });
-  }
-  return list.sort((a, b) => a.d - b.d);
-}
-function releaseHand(h) {
-  h.pull = null;
-  const held = h.held;
-  if (!held) return;
-  h.held = null;
-  if (held.type === 'prop') {
-    const p = held.p;
-    // Wurf: Handgeschwindigkeit + Drehung mitgeben
-    makeLoose(p, h.vel.clone().multiplyScalar(1.1), h.angVel.clone());
-    return;
-  }
-  const obj = held.obj;
-  obj.updateWorldMatrix(true, false);
-  obj.matrixWorld.decompose(obj.position, obj.quaternion, tmpS);
-  h.ray.remove(obj);
-  addDebris(obj, h.vel.clone(), 4);
-}
-
-// Zeigestrahl: UI-Knöpfe und entfernte Gegenstände (Heranziehen mit Griff-Taste)
+// Zeigestrahl: UI-Knöpfe
 function pointerTarget(h) {
   h.ray.getWorldPosition(tmpV);
   raycaster.set(tmpV, tmpV3.set(0, 0, -1).applyQuaternion(h.quat));
@@ -267,12 +173,6 @@ function pointerTarget(h) {
   for (const ph of raycaster.intersectObjects(uiPanels.filter(p => p.mesh.visible).map(p => p.mesh), false)) {
     if (ph.object.userData.ui.buttonAt(ph.uv)) { best = { kind: 'ui', dist: ph.distance, panel: ph.object.userData.ui, uv: ph.uv }; break; }
   }
-  for (const p of props) {
-    if (p.holder) continue;
-    const box = new THREE.Box3().setFromObject(p.obj).expandByScalar(0.03);
-    const hit = raycaster.ray.intersectBox(box, tmpV2);
-    if (hit) { const d = hit.distanceTo(tmpV); if (d < 4 && (!best || d < best.dist)) best = { kind: 'prop', p, dist: d }; }
-  }
   return best;
 }
 
@@ -280,7 +180,7 @@ function updateHandsXR(dt) {
   for (const h of hands) {
     if (!h.src) { h.pointer.visible = false; continue; }
     h.tipMarker.visible = state === 'setup' && setup.tool === 'floor';
-    const free = isFree(h);
+    const free = true;
     // Zeigestrahl (im Einrichtungsmodus als Laser bis zum Boden / zur Wand)
     let pt = null;
     if (free && !(setup.drag && setup.drag.src === h)) pt = pointerTarget(h);
@@ -299,25 +199,6 @@ function updateHandsXR(dt) {
     h.pointer.scale.z = len;
     const hover = pt && pt.kind === 'ui' ? pt.panel.buttonAt(pt.uv) : null;
     if (h.uiHover !== hover) { if (h.uiHover) h.uiHover.panel.setHover(null); h.uiHover = hover; if (hover) { hover.panel.setHover(hover); pulse(h, 0.1, 10); } }
-
-    // Griff-Taste: greifen
-    if (down(h, 'squeeze') && !free && settings.grip === 'toggle' && h.held) releaseHand(h); // Umschalten: nochmal drücken = loslassen
-    else if (down(h, 'squeeze') && free && !(state === 'setup' && setup.align)) {
-      const c = grabCandidates(h)[0];
-      if (c) grabProp(c.p, h);
-      else if (pt && pt.kind === 'prop' && pt.dist > 0.4) h.pull = pt; // aus der Ferne heranziehen
-    }
-    if (h.pull) {
-      const p = h.pull.p;
-      if (p.holder) h.pull = null;
-      else {
-        const o = p.obj;
-        if (p.phys) { const b = p.phys.body; b.wakeUp(); b.velocity.set(0, 0, 0); const k = Math.min(1, dt * 10); b.position.x += (h.point.x - o.position.x) * k; b.position.y += (h.point.y - o.position.y) * k; b.position.z += (h.point.z - o.position.z) * k; }
-        else o.position.lerp(h.point, Math.min(1, dt * 10));
-        if (o.position.distanceTo(h.point) < 0.2) { h.pull = null; grabProp(p, h); }
-      }
-    }
-    if (up(h, 'squeeze') && !(settings.grip === 'toggle' && h.held)) releaseHand(h);
 
     // Abzug: UI klicken bzw. Raum-Werkzeug
     if (free && down(h, 'trigger')) {
@@ -444,7 +325,6 @@ const SETTINGS_TABS = {
     { key: 'announcerVoice', label: 'Ansager-Stimme', opts: [['demon', 'Dämon'], ['deep', 'Tief'], ['normal', 'Normal'], ['high', 'Hoch']] }
   ] },
   bedienung: { label: '✊ Bedienung', items: [
-    { key: 'grip', label: 'Griff-Taste', opts: [['hold', 'Halten'], ['toggle', 'Tippen']] },
     { key: 'haptics', label: 'Vibration', opts: [[0, 'Aus'], [0.5, 'Schwach'], [1, 'Normal'], [1.5, 'Stark']] },
     { key: 'popups', label: 'Text-Einblendungen', opts: onOff }
   ] },
@@ -459,7 +339,7 @@ const SETTINGS_TABS = {
 };
 const SETTINGS_DEFAULT = {
   master: 9, sfx: 10, music: 6, voices: 10, announcer: 10, announcerVoice: 'deep',
-  grip: 'hold', haptics: 1, popups: true,
+  haptics: 1, popups: true,
   quality: 'balanced', shadows: true, particles: 1, dust: true, frameRate: 90, autoPerf: true
 };
 const settings = Object.assign({}, SETTINGS_DEFAULT, { shadows: shadowsOn }, load('burg-einstellungen', {}));
@@ -1000,7 +880,7 @@ function updateSetup(dt) {
   const laserTool = setup.tool && setup.tool !== 'floor';
   for (const src of srcs) {
     const marker = src === 'mouse' ? mouseMarker : src.floorMarker;
-    if (!laserTool || (src !== 'mouse' && (!isFree(src) || src.uiHover))) continue;
+    if (!laserTool || (src !== 'mouse' && src.uiHover)) continue;
     if (setup.tool === 'erase') continue;
     if (setup.tool === 'door' || setup.tool === 'window') {
       const wh = setup.drag && setup.drag.src === src ? wallHit(rayOf(src), setup.drag.wall) : wallHit(rayOf(src));
@@ -1018,7 +898,7 @@ function updateSetup(dt) {
   }
   if (setup.tool === 'erase') {
     let hx = null;
-    for (const src of srcs) { if (src !== 'mouse' && (!isFree(src) || src.uiHover)) continue; hx = surfaceAt(rayOf(src)); if (hx) break; }
+    for (const src of srcs) { if (src !== 'mouse' && src.uiHover) continue; hx = surfaceAt(rayOf(src)); if (hx) break; }
     hoverSurface(hx);
   } else if (setup.hoverS) unhover();
   // Ziehen
@@ -1064,7 +944,7 @@ function updateSetup(dt) {
   const stickY = hands.reduce((a, h) => (Math.abs(h.stickY) > Math.abs(a) ? h.stickY : a), 0);
   if (p && p.type === 'window') {
     // die Hand, die gezeichnet hat, bestimmt die Höhe
-    const src = !renderer.xr.isPresenting ? 'mouse' : (p.src && p.src !== 'mouse' && p.src.src && !p.src.uiHover ? p.src : (hands.find(h => h.src && isFree(h) && !h.uiHover) || null));
+    const src = !renderer.xr.isPresenting ? 'mouse' : (p.src && p.src !== 'mouse' && p.src.src && !p.src.uiHover ? p.src : (hands.find(h => h.src && !h.uiHover) || null));
     const mid = p.a.clone().add(p.b).multiplyScalar(0.5).setY(0);
     if (src) { const hgt = heightFromRay(rayOf(src), mid, 2.6); if (hgt) p[p.stage] = THREE.MathUtils.damp(p[p.stage], hgt, 20, dt); }
     if (hands.some(h => down(h, 'b'))) { setup.pending = null; setup.msg = 'Abgebrochen'; refreshSetupPanel(); return; }
@@ -1079,7 +959,7 @@ function updateSetup(dt) {
     if (setup.refT <= 0) { setup.refT = 0.15; refreshSetupPanel(); }
   } else if (p) {
     // die Hand, die gezeichnet hat, bestimmt die Höhe
-    const src = !renderer.xr.isPresenting ? 'mouse' : (p.src && p.src !== 'mouse' && p.src.src && !p.src.uiHover ? p.src : (hands.find(h => h.src && isFree(h) && !h.uiHover) || null));
+    const src = !renderer.xr.isPresenting ? 'mouse' : (p.src && p.src !== 'mouse' && p.src.src && !p.src.uiHover ? p.src : (hands.find(h => h.src && !h.uiHover) || null));
     const s0 = boxWithHeight(p);
     if (src) {
       const hgt = heightFromRay(rayOf(src), s0.center.clone().setY(0));
@@ -1104,7 +984,7 @@ function updateSetup(dt) {
   //  · linker Stick = in alle Richtungen schieben, rechter Stick ◀ ▶ = drehen (fein)
   if (setup.align && !d) {
     const a = setup.align;
-    const grabber = renderer.xr.isPresenting ? hands.find(h => h.src && h.btn.squeeze && !h.held) : null;
+    const grabber = renderer.xr.isPresenting ? hands.find(h => h.src && h.btn.squeeze) : null;
     if (grabber) {
       const hy = handYaw(grabber);
       if (!a.grab || a.grab.h !== grabber) {
@@ -1165,7 +1045,7 @@ function updateSetup(dt) {
 }
 function enterSetup() {
   state = 'setup';
-  for (const h of hands) releaseHand(h); // Hände frei zum Einrichten
+  clearEnemies();
   setEditMode(true);
   menuPanel.visible = false;
   setupPanel.visible = true;
@@ -1193,14 +1073,16 @@ function finishSetup() {
 }
 
 // =============================================================================
-// Spielablauf (Grundgerüst): Menü → Spielen → Pause/Hauptmenü
+// Spielablauf: Menü → START → Skelette kommen durch Türen & Fenster → Pause/Hauptmenü
 // =============================================================================
 let state = 'menu';
-const inRound = () => state === 'playing';
+const MAX_ALIVE = 6;       // höchstens so viele Skelette gleichzeitig
+let spawnT = 0, spawned = 0;
 
 function enterMenu() {
   state = 'menu';
   menuView = 'main';
+  clearEnemies();
   menuPanel.visible = true;
   menuPanel.place(Math.min(1.1, freeDistance(headPos, inFront(1, 0.2, headPos.y).sub(headPos), 1.4) - 0.15), 0.2, -0.15);
   refreshMenu();
@@ -1208,21 +1090,16 @@ function enterMenu() {
 function refreshMenu() {
   if (menuView === 'settings') { refreshSettings(); return; }
   if (paused) { menuPanel.visible = false; pausePanel.visible = true; refreshPause(); return; } // aus den Einstellungen zurück in die Pause
-  const nOpen = surfacesOf('door', 'window').length;
+  const nDoor = surfacesOf('door').length, nWin = surfacesOf('window').length;
   menuPanel.set((ctx, w) => {
     text(ctx, '🏰 Burg-Abwehr', w / 2, 48, 48, '#fff', 'center', true);
-    text(ctx, 'Neuanfang – Raum, Physik und Menü sind bereit.', w / 2, 100, 24, '#cfd8e3');
-    text(ctx, `Raum: ${surfacesOf('wall').length} Wände · ${nOpen} Türen/Fenster · ${surfacesOf('table', 'chair').length} Möbel`, w / 2, 134, 22, nOpen ? '#9ad' : '#ffb04a', 'center', true);
-    text(ctx, 'Kisten: hingreifen + Griff-Taste · aus der Ferne: Laser + Griff-Taste · loslassen = werfen', w / 2, 452, 19, '#cfd8e3');
+    text(ctx, `Raum: ${surfacesOf('wall').length} Wände · ${nDoor} Türen · ${nWin} Fenster · ${surfacesOf('table', 'chair').length} Möbel`, w / 2, 104, 24, '#9ad', 'center', true);
+    text(ctx, nDoor + nWin ? 'Die Skelette kommen durch deine Türen und Fenster.' : '⚠ Keine Türen/Fenster eingezeichnet – Skelette steigen aus dem Boden.', w / 2, 140, 22, nDoor + nWin ? '#cfd8e3' : '#ffb04a');
     text(ctx, `Version ${VERSION}`, w - 24, 664, 18, '#6b7a90', 'right');
   }, [
-    ...row(170, 64, [{ id: 'start', label: '▶ SPIELEN', font: 40, onClick: startPressed }], 792, 200),
-    ...row(256, 58, [
-      { id: 'room', label: '🧱 Raum bearbeiten', onClick: enterSetup },
-      { id: 'crate', label: '📦 Testkiste', onClick: () => { spawnCrate(inFront(0.7, 0, headPos.y + 0.1)); SFX.ui(); } }
-    ], 792),
-    ...row(328, 58, [
-      { id: 'clearprops', label: '🧹 Kisten wegräumen', font: 28, disabled: !props.length, onClick: () => { clearProps(); refreshMenu(); } },
+    ...row(180, 70, [{ id: 'start', label: '▶ START', font: 42, onClick: startPressed }], 792, 200),
+    ...row(280, 60, [
+      { id: 'room', label: '🧱 Raum einrichten', onClick: enterSetup },
       { id: 'settings', label: '⚙ Einstellungen', onClick: () => { menuView = 'settings'; refreshMenu(); } }
     ], 792)
   ]);
@@ -1261,8 +1138,23 @@ function startPressed() {
   if (state !== 'menu') return;
   state = 'playing';
   menuPanel.visible = false;
+  clearEnemies();
+  clearDebris();
+  prepareNav(headPos);
+  spawnT = 1.5; spawned = 0;
   SFX.ui();
+  speak('Die Skelette kommen');
   floatingText('Pause: Stick drücken oder B/Y (PC: Esc)', inFront(1.2, 0, headPos.y - 0.1), '#ffd36a');
+}
+function updateGame(dt) {
+  if (state !== 'playing') return;
+  spawnT -= dt;
+  if (spawnT <= 0 && aliveCount() < MAX_ALIVE) {
+    spawnEnemy(headPos);
+    spawned++;
+    spawnT = THREE.MathUtils.randFloat(2.5, 4.5);
+  }
+  updateEnemies(dt, headPos);
 }
 
 // =============================================================================
@@ -1271,7 +1163,6 @@ function startPressed() {
 const mouseNdc = new THREE.Vector2();
 let lookYaw = 0, lookPitch = -0.2, rightDrag = false, lastX = 0, lastY = 0;
 const keys = new Set();
-let deskHeld = null; // am PC gehaltene Kiste
 renderer.domElement.addEventListener('pointermove', (e) => {
   mouseNdc.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
   crosshairEl.style.left = e.clientX + 'px';
@@ -1292,24 +1183,7 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
   if (ui) { const b = ui.object.userData.ui.buttonAt(ui.uv); if (b) { b.onClick(); SFX.ui(); } return; }
   if (paused) return; // in der Pause nur Menü-Knöpfe
   if (state === 'setup') { setupTriggerDown('mouse'); return; }
-  // Kiste mit der Maus greifen (Klick) und werfen (nochmal klicken)
-  if (deskHeld) { deskThrow(); return; }
-  const hit = raycaster.intersectObjects(props.map(p => p.obj), false)[0];
-  if (hit && hit.distance < 5) {
-    const p = props.find(q => q.obj === hit.object);
-    if (p.phys) { removeDynamic(p.phys); p.phys = null; }
-    camera.attach(p.obj);
-    p.obj.position.set(0.15, -0.2, -0.6);
-    deskHeld = p;
-    SFX.grab();
-  }
 });
-function deskThrow() {
-  const p = deskHeld;
-  deskHeld = null;
-  raycaster.setFromCamera(mouseNdc, camera);
-  makeLoose(p, raycaster.ray.direction.clone().multiplyScalar(6).add(new THREE.Vector3(0, 1.5, 0)), new THREE.Vector3(2, 1, 0));
-}
 window.addEventListener('pointerup', (e) => {
   if (e.button === 2) rightDrag = false;
   if (e.button === 0 && setup.drag && setup.drag.src === 'mouse') setupTriggerUp();
@@ -1321,7 +1195,6 @@ window.addEventListener('keydown', (e) => {
   if (paused) return; // in der Pause keine Spiel-Tasten
   keys.add(e.code);
   if (e.key === 'Enter') startPressed();
-  if (e.key === 'c' || e.key === 'C') spawnCrate(inFront(1, 0, 1.4));
 });
 window.addEventListener('keyup', (e) => keys.delete(e.code));
 // PC: mit WASD durch den Raum gehen
@@ -1352,8 +1225,7 @@ renderer.xr.addEventListener('sessionstart', () => {
   desktopFloor.visible = false;
   crosshairEl.style.display = 'none';
   ensureAudio();
-  if (deskHeld) deskThrow();
-  clearProps();
+  clearEnemies();
   room.desktop = false;
   baseRefSpace = renderer.xr.getReferenceSpace();
   applyFloorOffset();
@@ -1369,8 +1241,7 @@ renderer.xr.addEventListener('sessionend', () => {
   desktopFloor.visible = true;
   crosshairEl.style.display = '';
   camera.position.set(0, 1.6, 0);
-  for (const h of hands) { h.held = null; h.pull = null; }
-  clearProps();
+  clearEnemies();
   setPaused(false);
   clearRoom();
   baseRefSpace = null;
@@ -1415,7 +1286,7 @@ function setPaused(on) {
     clock.getDelta(); // die Pausenzeit nicht als einen riesigen Zeitschritt nachholen
   }
 }
-const pauseButton = (h) => down(h, 'stick') || (down(h, 'b') && !h.held);
+const pauseButton = (h) => down(h, 'stick') || down(h, 'b');
 // Bild während der Pause: nur Kopf, Zeigestrahl und Menü – alles andere steht still
 function pauseFrame(xr) {
   clock.getDelta();
@@ -1504,6 +1375,7 @@ function frameInner() {
   }
   if (state === 'setup') updateSetup(dt);
   stepPhysics(dt);
+  updateGame(dt);
   updateDust(dt);
   updateAtmosphere(dt);
   getViewCamera().getWorldDirection(tmpV);
@@ -1518,8 +1390,8 @@ function frameInner() {
 // Für automatisierte Tests
 applySettings();
 window.__game = {
-  renderer, room, hands, props, uiPanels, settings, setup, menuPanel, setupPanel, pausePanel,
+  renderer, room, hands, enemies, uiPanels, settings, setup, menuPanel, setupPanel, pausePanel,
   get state() { return state; }, get paused() { return paused; }, get errors() { return errorCount; }, get floorOffset() { return floorOffset; },
-  startPressed, enterMenu, enterSetup, finishSetup, setPaused, spawnCrate, clearProps, setTool, setupTriggerDown, setupTriggerUp,
+  startPressed, enterMenu, enterSetup, finishSetup, setPaused, spawnEnemy: () => spawnEnemy(headPos), setTool, setupTriggerDown, setupTriggerUp,
   alignToLine, loadSlot, saveSlot, serializeRoom, surfaceAt, updateSetup
 };
