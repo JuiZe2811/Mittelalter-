@@ -1,133 +1,62 @@
-# Burg-Abwehr (Mittelalter)
+# Burg-Abwehr (Mittelalter) – Neuanfang
 
-Dies ist ein Ableger von **Zombie-Abwehr** für die Meta Quest 3 (WebXR mit Passthrough), angesiedelt im Mittelalter.
-Raum-Einrichtung, Physik, Bewegung, Gürtel, Rückenholster, Wellen und Bestenliste stammen aus dem Hauptspiel.
-Statt Zombies und Schusswaffen kämpfst du hier mit **Schwertern, Äxten, Speer und Bogen gegen Skelett-Krieger**.
+Ein Mittelalter-Spiel für die Meta Quest 3 (WebXR mit Passthrough).
+Das Grundgerüst stammt aus dem Projekt **VrSpiel**. Alle Spielinhalte sind entfernt, damit wir sie neu bauen können.
 
-Starten: Öffne `index.html` über denselben Webserver wie das Hauptspiel.
-Bestenliste und Einstellungen sind vom Hauptspiel getrennt.
-Gespeicherte Räume werden geteilt, damit du deinen Raum nicht noch einmal einrichten musst.
+Starten: `index.html` über einen Webserver öffnen, z. B. über GitHub Pages oder lokal mit `python3 -m http.server`.
 
-## Neu: Reines Mittelalter, Schilde und echter Schwertkampf
+## Was übernommen wurde
 
-- **Alles Neumodische ist entfernt:**
-  - keine Schusswaffen, Magazine, Patronen, Zielfernrohre und Plasma-Waffen mehr
-  - kein Trommel-Affe und kein Kamera-Knopf mehr
-  - keine Getränkeautomaten und kein Aufrüster mehr; der Code dafür ist gelöscht, nicht nur versteckt
-- **Neue Stationen statt der Automaten:**
-  - Alchemisten-Tische mit leuchtenden Tränken und Pergament-Schildern
-  - eine Schmiede mit Amboss, Esse und Schleifstein zum Aufwerten
-  - eine Schatztruhe mit Wappen
-- **Neue Fallen:** Blitzrune (Runenkreis) und Feuergrube
-- **Der Boss** ist ein Schwarzer Ritter mit Krone, Bogen und Armbrust.
+- **Raum einrichten:**
+  - Wände, Türen und Fenster mit dem Laser einzeichnen
+  - Tische und Stühle aufziehen
+  - Bodenhöhe einstellen
+  - Flächen löschen, letzten Schritt rückgängig machen
+  - Raum aus der Quest-Raumeinrichtung übernehmen
+  - 5 Speicherplätze für Räume
+  - Ausrichten: eine geladene Karte an die echten Wände anlegen
+- **Türen und Fenster:** dunkler Flur mit Flackerlicht hinter Türen, Nachthimmel mit Blitz und Donner hinter Fenstern
+- **Physik:** cannon-es; echte Wände und Möbel sind feste Körper
+- **Greifen und Werfen:**
+  - Gegenstände greifen: Griff-Taste
+  - aus der Ferne heranziehen: Laser + Griff-Taste
+  - werfen: loslassen
+  - Zum Testen gibt es Holzkisten.
+- **Menü:**
+  - Hauptmenü
+  - Einstellungen: Ton, Bedienung, Grafik
+  - Pause-Menü: Stick drücken oder B/Y, am PC Esc
+- **Technik:**
+  - Schatten
+  - Staub in der Luft
+  - Leistungsprofile
+  - automatische Anpassung, wenn es ruckelt
+  - Bildrate 72, 90 oder 120 Hz
+  - Fehler werden abgefangen, das Spiel läuft weiter
+- **PC-Test ohne Brille:**
+  - umschauen: rechte Maus ziehen
+  - gehen: WASD
+  - Kiste greifen, nochmal klicken = werfen: Linksklick
+  - Testkiste erzeugen: C
 
-## Waffen
+## Was entfernt wurde
 
-| Waffe | Art | Besonderheit |
-|---|---|---|
-| Langschwert | Startwaffe (Scheide an der rechten Hüfte) | Hieb & Stich, trifft bis zu 2 Gegner |
-| Kurzschwert | Wandkauf | leicht und schnell, ideal mit Schild |
-| Falchion | Wandkauf | schwere Hiebklinge |
-| Rapier | Wandkauf | schnelle Stiche, sehr starke Kopftreffer |
-| Streitaxt | Wandkauf | bricht durch Ritter-Schilde |
-| Streitkolben | Wandkauf | bricht durch Rüstung, betäubt |
-| Morgenstern | Wandkauf | betäubt getroffene Gegner |
-| Kriegsflegel | Wandkauf | Stachelkugel an einer Kette, die physikalisch mitschwingt |
-| Kriegshammer | Wandkauf | durchschlägt jede Rüstung, wirft Gegner um |
-| Speer | Wandkauf | nur Stöße zählen, durchbohrt 3 Gegner |
-| Hellebarde | Wandkauf | Stangenwaffe für Hieb und Stoß, trifft 3 Gegner |
-| Zweihänder | Wandkauf | trifft bis zu 4 Gegner |
-| Kurzbogen / Langbogen | Wandkauf | Sehne greifen, ziehen, loslassen |
-| Armbrust | Wandkauf | Sehne spannen, bis sie einrastet, dann mit dem Abzug schießen |
-| Flammenschwert, Donnerhammer, Frostaxt, Frostbogen | Schatztruhe | Feuer, Blitz oder Eis |
+Alle Waffen, Schilde, Bögen, Dolche und Brandbomben, außerdem:
 
-Außerdem: **Wurfdolche** und **Brandbomben** am Gürtel.
+- Tränke und Automaten, Schmiede, Schatztruhe, Wandkäufe, Fallen
+- Gegner (Skelette, Troll, Boss) mit ihren 3D-Modellen
+- Wellen, Punkte, Bestenliste, Bretter an Türen und Fenstern
 
-## Schilde (zweite Hand)
+Ältere gespeicherte Räume aus dem Hauptspiel lassen sich weiter laden. Wandkauf-, Automaten- und Kisten-Plätze darin werden übersprungen.
 
-| Schild | Hält | Woher |
-|---|---|---|
-| Holzschild | 5 Treffer | Startschild an der linken Hüfte; zerbricht er, liegt nach 20 s ein neuer bereit |
-| Rundschild | 8 Treffer | Wandkauf |
-| Drachenschild | 11 Treffer | Wandkauf |
-| Turmschild | 16 Treffer | Wandkauf |
-| Wappenschild | 13 Treffer, Stoß wirft um | Schatztruhe |
+## Dateien
 
-- Halte den Schild zwischen dich und den Angreifer, dann wird der Schlag geblockt.
-  - Jeder Block kostet Haltbarkeit, und es entstehen sichtbare Risse.
-  - Am Ende zerbricht der Schild in Splitter.
-  - Der Angreifer prallt ab und taumelt.
-- Auch Pfeile der Bogenschützen kannst du mit dem Schild abfangen.
-- **Schildstoß:** Stößt du kräftig mit dem Schild nach vorne, wird das Skelett betäubt.
-- Ein beschädigter Schild lässt sich an der Wand reparieren. Das „Volle Köcher“-Power-up repariert ebenfalls.
-
-## Kampf wie im Mittelalter
-
-- **Ausholen:** Skelette heben vor jedem Hieb sichtbar das Schwert über den Kopf. Etwa eine halbe Sekunde vorher siehst du den Schlag kommen.
-- **Verteidigen:** Du kannst zurückweichen, mit dem Schild blocken oder mit der Klinge **parieren**.
-  - Zum Parieren hältst du die Klinge quer vor den Körper.
-  - Eine Parade fängt 70 % des Schadens ab und lässt den Gegner taumeln.
-- **Gegenangriff:** Harte Treffer lassen Skelette taumeln und unterbrechen ihr Ausholen. Schwere Waffen werfen sie um.
-- **Ritter:** Sie blocken Hiebe und Pfeile von vorne mit ihrem Schild.
-  - Dagegen helfen Axt, Hammer, Kolben, Flegel oder Hellebarde, ein Angriff von der Seite oder ein Schildstoß zum Betäuben.
-
-**Nahkampf (VR):**
-- Treffer zählen nur bei einem echten Schwung. Je schneller die Klinge, desto mehr Schaden.
-- Langsames Hineinhalten macht keinen Schaden.
-- Jedes Skelett wird pro Schwung nur einmal getroffen.
-- Kopftreffer richten mehr Schaden an.
-- Zweihänder, Speer, Hellebarde und Kriegshammer kannst du mit der zweiten Hand führen.
-
-**Bogen (VR):**
-1. Halte den Bogen in einer Hand.
-2. Greife mit der anderen Hand die Sehne (Griff-Taste in der Nähe der Sehne).
-3. Ziehe die Sehne zurück. Der Pfeil fliegt dorthin, wohin er zwischen Sehne und Bogen zeigt.
-4. Lass los.
-
-Ein voller Auszug bringt den vollen Schaden. Nachschub an Pfeilen gibt es am Wandkauf.
-
-**Schmiede (Aufrüsten):**
-- Nahkampfwaffen: treffen mehr Gegner, ab ★★ mit brennender Klinge, ★★★ mit Blitzschlag.
-- Bögen: 3 Pfeile pro Schuss und mehr Durchschlag, ab ★★ Brandpfeile, ★★★ explosive Pfeile.
-
-**PC-Test:**
-- Klick: zuschlagen
-- Bogen: Maus halten zum Spannen, loslassen zum Schießen
-- F: Dolch werfen
-- G: Brandbombe
-- Armbrust: Klick spannt bzw. schießt
-- Schild: ausrüsten (Zahl), dann blockt er Angriffe von vorne; Klick ist ein Schildstoß
-
-## Gegner
-
-| Typ | Beschreibung |
+| Datei | Inhalt |
 |---|---|
-| Skelett | Knochenkrieger mit rostigem Schwert, manchmal mit Wappenrock oder Helm |
-| Späher | schnell, mit Kapuze |
-| Ritter | gepanzert, mit Helm, Schild und Schwert, zäh |
-| Kriecher | kriecht am Boden |
-| Pestbringer | leuchtender Pestbeutel, explodiert in deiner Nähe |
-| Bogenschütze | schießt Brandpfeile aus der Ferne (ausweichen!) |
-| Troll | großes Monster in späteren Wellen |
-| Boss | jede 5. Welle, mit Bogen und Armbrust; jede Stufe bringt eine stärkere Fernwaffe |
-
-## Tränke
-
-- Eisenhaut
-- Flinkhand (leichtere Treffer, schnellere Pfeile)
-- Berserker (Treffer betäuben)
-- Zweites Leben
-- Doppelschlag
-- Adlerauge (Kopftreffer stärker)
-- Kettenhemd
-- Blutdurst
-- Blitzklinge (jeder 4. Treffer schleudert einen Blitz)
-- Großer Köcher (50 % mehr Pfeile)
-
-## Technik
-
-- `js/medieval.js`: Modelle und Daten aller Waffen und Schilde.
-- `js/weapons.js`: schlankes Grundgerüst für den Modellbau, dazu Dolch und Brandbombe; Schusswaffen gibt es dort nicht mehr.
-- `js/main.js`: Schild-Block und Parade (`defendHit`), Schilde zerbrechen (`breakShield`), Flegel-Physik (`flailStep`), Armbrust (`xbowFire`).
-- `js/main.js`: Nahkampf über Klingen-Strahlen von Bild zu Bild (`meleeUpdate`), Bogen mit Sehnen-Griff (`bowUpdate` und `bowRelease`), Pfeilflug (`updateBowArrow`).
-- `js/zombies.js`: Die Skelette nutzen dieselbe Gelenk-Struktur wie die Zombies. Animationen, Trefferzonen, Klettern und abfallende Glieder funktionieren deshalb unverändert.
+| `js/main.js` | Grundgerüst: Hände, Greifen, Raum-Einrichtung, Menü, Einstellungen, Pause, Hauptschleife |
+| `js/room.js` | Raum-Modell: Wände, Türen, Fenster, Tische, Stühle; Speichern und Laden |
+| `js/physics.js` | Physik-Welt (cannon-es) |
+| `js/effects.js` | Partikel, schwebende Texte, Trümmer, Flecken |
+| `js/sfx.js` | Synthetische Geräusche und Musik (Web Audio, keine Audiodateien) |
+| `js/util.js` | Text-Panels, Materialien, Geometrie-Hilfen |
+| `tools/version.py` | Versionsnummer setzen, damit der Browser keine alten Dateien nutzt: `python3 tools/version.py 4` |
