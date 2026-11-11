@@ -33,13 +33,29 @@ Es gibt keine Bosse und keine Riesen.
   - Bei 0 Leben zerfallen sie in Knochen.
 - Mit der Zeit wird es schwerer: Es kommen mehr Skelette gleichzeitig, höchstens 8, und sie kommen schneller nach.
 
+## Waffen-Menü
+
+Öffnen kannst du es jederzeit:
+- in VR mit der **A/X**-Taste
+- im Hauptmenü und im Pause-Menü über den Knopf **🗡 Waffen-Menü**
+- am PC mit **Q**
+
+Was es kann:
+- **Waffe anklicken:** Sie kommt in die Hand, mit der du geklickt hast. Ist diese Hand schon belegt, kommt sie in die andere freie Hand, sonst schwebt sie vor dir.
+- **Waffe loslassen:** Griff-Taste drücken und loslassen, dann fällt sie mit Physik herunter.
+- **🎯 Übungsskelett:** Ein Skelett steht vor dir und wehrt sich nicht. Damit kannst du die Waffen testen.
+- **🧲 Waffen herholen:** Alle Waffen im Raum schweben wieder vor dir.
+- **🧹 Wegräumen:** Alle Waffen verschwinden.
+
+Du kannst beliebig viele Waffen holen. Ab 12 Waffen verschwindet automatisch die älteste, die gerade niemand hält.
+
+Bei START öffnet sich das Waffen-Menü automatisch, wenn du noch keine Waffe hast. Solange das Waffen-Menü während einer Runde offen ist, stehen die Skelette still.
+
 ## Waffen
 
-Zu Beginn schweben alle Waffen vor dir. Du nimmst sie so:
+Liegt eine Waffe im Raum, nimmst du sie so:
 - hingreifen und die Griff-Taste halten
-- oder mit dem Laser darauf zeigen und die Griff-Taste drücken, dann fliegt die Waffe in deine Hand
-
-Loslässt du eine Waffe, fällt sie mit Physik herunter. Im Pause-Menü holt **Waffen holen** alle Waffen wieder vor dich.
+- oder mit dem Laser darauf zeigen und die Griff-Taste drücken, dann fliegt sie in deine Hand
 
 | Waffe | Bedienung |
 |---|---|
@@ -54,7 +70,7 @@ Loslässt du eine Waffe, fällt sie mit Physik herunter. Im Pause-Menü holt **W
 - **Pause:** Stick drücken oder B/Y mit freier Hand, am PC Esc.
   - Weiter
   - Einstellungen
-  - Waffen holen
+  - Waffen-Menü
   - Runde beenden
 - **Nach der Runde** zeigt das Menü, wie viele Skelette du erledigt hast und wie lange du durchgehalten hast.
 
@@ -64,6 +80,7 @@ Loslässt du eine Waffe, fällt sie mit Physik herunter. Im Pause-Menü holt **W
 |---|---|
 | rechte Maus ziehen | umschauen |
 | WASD | gehen, auch auf den Tisch hinauf (zum Testen des Kletterns) |
+| Q | Waffen-Menü auf/zu |
 | 1 / 2 / 3 / 4 | Dolch / Schwert / Bogen / Schild (Schild zusätzlich links) |
 | Linksklick | zuschlagen; mit dem Bogen gedrückt halten = spannen, loslassen = schießen |
 | F | Dolch werfen |
@@ -83,4 +100,4 @@ Loslässt du eine Waffe, fällt sie mit Physik herunter. Im Pause-Menü holt **W
 | `js/effects.js` | Partikel, schwebende Texte, Trümmer |
 | `js/sfx.js` | Synthetische Geräusche (Web Audio) |
 | `js/util.js` | Text-Panels und Hilfsfunktionen |
-| `tools/version.py` | Versionsnummer setzen: `python3 tools/version.py 6` |
+| `tools/version.py` | Versionsnummer setzen: `python3 tools/version.py 7` |

@@ -1,15 +1,15 @@
 import * as THREE from 'three';
-import { VERSION } from './version.js?v=5';
+import { VERSION } from './version.js?v=6';
 import { ARButton } from 'three/addons/webxr/ARButton.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { makePanel, panelBg, roundRect } from './util.js?v=5';
-import { SFX, SFX_PLAYER, ensureAudio, setListener, setVolumes, setAudioPaused } from './sfx.js?v=5';
-import { stepPhysics, addDynamic, removeDynamic, localBoxOf } from './physics.js?v=5';
-import { initEnemies, spawnEnemy, updateEnemies, clearEnemies, prepareNav, aliveCount, enemies, hitTest, damageEnemy, bounceOff } from './enemies.js?v=5';
-import { groundAt } from './nav.js?v=5';
-import { WEAPON_ORDER, WEAPONS, createWeapon, setBowString, initWeapons, shootArrow, throwBlade, updateFlying, clearFlying } from './weapons.js?v=5';
-import { room, addWall, addBox, makeWall, makeBox, rotateBox, removeSurface, clearRoom, setEditMode, suggestYaw, surfacesOf, importDetectedPlanes, saveRoom, loadRoom, hasSavedRoom, surfaceName, serializeRoom, deserializeRoom, roomSlots, saveRoomSlot, loadRoomSlot, addOpening, makeOpening, roomOccluders, setAtmosphere, closeRoomGaps, closeRoom, openWallEnds } from './room.js?v=5';
-import { initEffects, headRef, floatingText, updateEffects, updateDebris, fx, clearDebris, sparks } from './effects.js?v=5';
+import { makePanel, panelBg, roundRect } from './util.js?v=6';
+import { SFX, SFX_PLAYER, ensureAudio, setListener, setVolumes, setAudioPaused } from './sfx.js?v=6';
+import { stepPhysics, addDynamic, removeDynamic, localBoxOf } from './physics.js?v=6';
+import { initEnemies, spawnEnemy, updateEnemies, clearEnemies, prepareNav, aliveCount, enemies, hitTest, damageEnemy, bounceOff } from './enemies.js?v=6';
+import { groundAt } from './nav.js?v=6';
+import { WEAPON_ORDER, WEAPONS, createWeapon, setBowString, initWeapons, shootArrow, throwBlade, updateFlying, clearFlying } from './weapons.js?v=6';
+import { room, addWall, addBox, makeWall, makeBox, rotateBox, removeSurface, clearRoom, setEditMode, suggestYaw, surfacesOf, importDetectedPlanes, saveRoom, loadRoom, hasSavedRoom, surfaceName, serializeRoom, deserializeRoom, roomSlots, saveRoomSlot, loadRoomSlot, addOpening, makeOpening, roomOccluders, setAtmosphere, closeRoomGaps, closeRoom, openWallEnds } from './room.js?v=6';
+import { initEffects, headRef, floatingText, updateEffects, updateDebris, fx, clearDebris, sparks } from './effects.js?v=6';
 const hyp = (a, b, c = 0) => Math.sqrt(a * a + b * b + c * c); // schneller als Math.hypot und ohne Speicher-Müll
 
 // =============================================================================
@@ -204,9 +204,9 @@ function updateHandsXR(dt) {
     const free = !h.held && !h.drawing && !h.pull;
     // Zeigestrahl (im Einrichtungsmodus als Laser bis zum Boden / zur Wand)
     let pt = null;
-    if (free && !(setup.drag && setup.drag.src === h)) pt = pointerTarget(h);
+    if ((free || weaponPanel.visible) && !(setup.drag && setup.drag.src === h)) pt = pointerTarget(h);
     let len = pt ? pt.dist : 2;
-    const showPtr = free && (pt || state !== 'playing');
+    const showPtr = (free && (pt || state !== 'playing')) || (pt && pt.kind === 'ui');
     if (state === 'setup' && free && !pt && setup.tool && setup.tool !== 'floor') {
       if (setup.tool === 'door' || setup.tool === 'window') {
         const wh = setup.drag && setup.drag.src === h ? wallHit(rayOf(h), setup.drag.wall) : wallHit(rayOf(h));
@@ -221,6 +221,8 @@ function updateHandsXR(dt) {
     const hover = pt && pt.kind === 'ui' ? pt.panel.buttonAt(pt.uv) : null;
     if (h.uiHover !== hover) { if (h.uiHover) h.uiHover.panel.setHover(null); h.uiHover = hover; if (hover) { hover.panel.setHover(hover); pulse(h, 0.1, 10); } }
 
+    // A/X: Waffen-Menü öffnen/schließen
+    if (down(h, 'a') && (state === 'playing' || state === 'menu')) toggleWeaponMenu();
     // Griff-Taste: Sehne greifen (andere Hand hält den Bogen), Waffe nehmen oder per Laser heranziehen
     if (down(h, 'squeeze') && free && state !== 'setup') {
       const ow = otherHand(h).held;
@@ -231,10 +233,12 @@ function updateHandsXR(dt) {
         else if (pt && pt.kind === 'weapon') { h.pull = { w: pt.w }; SFX.whoosh(); }
       }
     }
-    if (up(h, 'squeeze')) releaseHand(h);
+    if (down(h, 'squeeze')) h.keepUntilSqueeze = false;
+    if (up(h, 'squeeze') && !h.keepUntilSqueeze) releaseHand(h);
 
     // Abzug: UI klicken bzw. Raum-Werkzeug
-    if (free && down(h, 'trigger')) {
+    if (hover && down(h, 'trigger')) { uiClickHand = h; hover.onClick(); uiClickHand = null; SFX.ui(); pulse(h, 0.3, 20); }
+    else if (free && down(h, 'trigger')) {
       if (hover) { hover.onClick(); SFX.ui(); pulse(h, 0.3, 20); }
       else if (state === 'setup') setupTriggerDown(h);
     }
@@ -1109,16 +1113,38 @@ function finishSetup() {
   setEditMode(false);
   setupPanel.visible = false;
   enterMenu();
-  placeOnRack();
+  for (const w of arsenal) { w.root.visible = true; if (!w.phys && !w.holder) placeOnRackOne(w); }
 }
 
 // =============================================================================
 // Waffen in der Welt: schweben zu Beginn vor dem Spieler, lassen sich greifen, fallen mit Physik herunter
 // =============================================================================
-const arsenal = []; // Dolch, Langschwert, Bogen, Schild – je genau ein Exemplar
-function ensureArsenal() {
-  if (arsenal.length) return;
-  for (const id of WEAPON_ORDER) { const w = createWeapon(id); scene.add(w.root); arsenal.push(w); }
+const arsenal = []; // alle Waffen in der Welt (aus dem Waffen-Menü geholt)
+const MAX_WEAPONS = 12;
+function newWeapon(id) {
+  const w = createWeapon(id);
+  scene.add(w.root);
+  arsenal.push(w);
+  // zu viele: die älteste nicht gehaltene Waffe verschwindet
+  if (arsenal.length > MAX_WEAPONS) { const old = arsenal.find(x => !x.holder && !x.desk && !x.thrown); if (old) removeWeapon(old); }
+  return w;
+}
+function removeWeapon(w) {
+  if (w === deskW) deskW = null;
+  if (w === deskShield) deskShield = null;
+  freeWeapon(w);
+  scene.remove(w.root);
+  arsenal.splice(arsenal.indexOf(w), 1);
+}
+function clearWeapons() { for (const w of [...arsenal]) if (!w.thrown) removeWeapon(w); }
+// Waffe aus dem Waffen-Menü holen: in die klickende Hand, sonst in die andere freie Hand, sonst schwebend vor dir
+function giveWeapon(id, h = null) {
+  const w = newWeapon(id);
+  if (!renderer.xr.isPresenting) { equipDesk(w); return w; }
+  const target = [h, h && otherHand(h), ...hands].find(x => x && x.src && !x.held && !x.drawing);
+  if (target) { takeWeapon(w, target); target.keepUntilSqueeze = true; }
+  else placeOnRackOne(w, true);
+  return w;
 }
 function freeWeapon(w) { // aus Hand/Physik/Flug lösen
   if (w.holder) { const h = w.holder; if (h.held === w) h.held = null; if (h.drawing && h.drawing === w) h.drawing = null; w.holder = null; }
@@ -1130,7 +1156,6 @@ function freeWeapon(w) { // aus Hand/Physik/Flug lösen
 }
 // Alle Waffen (außer gehaltenen, wenn keep) vor den Spieler zurückholen – schwebend, griffbereit
 function placeOnRack(all = true) {
-  ensureArsenal();
   // VR: auf Hüfthöhe direkt vor dir · PC: etwas weiter weg, damit man sie sieht
   const xr = renderer.xr.isPresenting;
   const yaw = headYaw(), y = xr ? Math.max(0.8, headPos.y - 0.65) : 0.95, dist = xr ? 0.5 : 1.2;
@@ -1346,7 +1371,7 @@ function updateWeapons(dt) {
       tmpM.multiplyMatrices(w.holder.ray.matrixWorld, HOLD_OFFSET);
       tmpM.decompose(w.root.position, w.root.quaternion, tmpS);
       w.root.updateMatrixWorld(true);
-      if (w.def.melee && state === 'playing') meleeUpdate(w, dt, w.holder);
+      if (w.def.melee && state !== 'setup') meleeUpdate(w, dt, w.holder);
     } else if (w.desk && w.def.melee && w.deskSwing > 0) { // PC-Schwung
       w.deskSwing -= dt;
       const k = 1 - Math.max(0, w.deskSwing) / 0.28;
@@ -1376,6 +1401,7 @@ function enterMenu() {
   menuView = 'main';
   clearEnemies();
   clearFlying();
+  weaponPanel.visible = false;
   menuPanel.visible = true;
   menuPanel.place(Math.min(1.1, freeDistance(headPos, inFront(1, 0.2, headPos.y).sub(headPos), 1.4) - 0.15), 0.2, -0.15);
   refreshMenu();
@@ -1388,14 +1414,15 @@ function refreshMenu() {
     const r = lastResult;
     if (r) text(ctx, `${r.died ? '💀 Die Skelette haben dich erwischt!' : 'Runde beendet'} · ${r.kills} Skelette erledigt · ${r.time}`, w / 2, 420, 24, '#ffcc33', 'center', true);
     text(ctx, '🏰 Burg-Abwehr', w / 2, 48, 48, '#fff', 'center', true);
-    text(ctx, 'Waffen schweben vor dir: hingreifen + Griff-Taste (oder Laser + Griff)', w / 2, 470, 20, '#cfd8e3');
+    text(ctx, 'Waffen holen: 🗡 Waffen-Menü (VR: A/X-Taste, PC: Q) – jederzeit, auch im Spiel', w / 2, 470, 20, '#cfd8e3');
     text(ctx, 'Bogen: Sehne mit der anderen Hand ziehen · Dolch im Schwung loslassen = Wurf', w / 2, 500, 19, '#cfd8e3');
     text(ctx, `Raum: ${surfacesOf('wall').length} Wände · ${nDoor} Türen · ${nWin} Fenster · ${surfacesOf('table', 'chair').length} Möbel`, w / 2, 104, 24, '#9ad', 'center', true);
     text(ctx, nDoor + nWin ? 'Die Skelette kommen durch deine Türen und Fenster.' : '⚠ Keine Türen/Fenster eingezeichnet – Skelette steigen aus dem Boden.', w / 2, 140, 22, nDoor + nWin ? '#cfd8e3' : '#ffb04a');
     text(ctx, `Version ${VERSION}`, w - 24, 664, 18, '#6b7a90', 'right');
   }, [
     ...row(180, 70, [{ id: 'start', label: '▶ START', font: 42, onClick: startPressed }], 792, 200),
-    ...row(280, 60, [
+    ...row(272, 60, [{ id: 'wmenu', label: '🗡 Waffen-Menü', font: 32, onClick: openWeaponMenu }], 792, 200),
+    ...row(346, 58, [
       { id: 'room', label: '🧱 Raum einrichten', onClick: enterSetup },
       { id: 'settings', label: '⚙ Einstellungen', onClick: () => { menuView = 'settings'; refreshMenu(); } }
     ], 792)
@@ -1439,16 +1466,17 @@ function startPressed() {
   clearFlying();
   clearDebris();
   prepareNav(headPos);
-  placeOnRack(false);
   spawnT = 3; spawned = 0;
   playerHp = 100; kills = 0; roundT = 0; lastResult = null; hudKey = '';
   SFX.ui();
   speak('Die Skelette kommen');
-  floatingText('Pause: Stick drücken oder B/Y (PC: Esc)', inFront(1.2, 0, headPos.y - 0.1), '#ffd36a');
+  if (!arsenal.some(w => w.holder || w.desk)) openWeaponMenu(); // noch keine Waffe in der Hand: gleich aussuchen
+  else floatingText('Waffen-Menü: A/X (PC: Q) · Pause: Stick oder B/Y (PC: Esc)', inFront(1.2, 0, headPos.y - 0.1), '#ffd36a');
 }
 function updateGame(dt) {
   updatePlayer(dt);
-  if (state !== 'playing') return;
+  if (state === 'menu') { updateEnemies(dt, headPos, playerFloor()); return; } // Übungsskelette im Menü
+  if (state !== 'playing' || weaponPanel.visible) return; // Waffen-Menü offen: alles steht still
   roundT += dt;
   // langsam schwerer: mehr Skelette gleichzeitig und schnellerer Nachschub
   const maxAlive = Math.min(8, 2 + Math.floor(roundT / 25));
@@ -1471,6 +1499,68 @@ function endRound(died) {
 }
 
 // =============================================================================
+// Waffen-Menü (Untermenü): Waffe aussuchen → kommt in die Hand. Jederzeit über A/X bzw. Q.
+// =============================================================================
+const weaponPanel = new UIPanel(1.0, 0.72, 760);
+weaponPanel.border = '#ffb347';
+weaponPanel.visible = false;
+let uiClickHand = null; // welche Hand gerade einen Knopf drückt (dorthin kommt die Waffe)
+let weaponMsg = '';
+function openWeaponMenu() {
+  if (state !== 'playing' && state !== 'menu') return;
+  menuPanel.visible = false;
+  weaponPanel.visible = true;
+  weaponPanel.place(0.75, 0, -0.2);
+  weaponMsg = '';
+  refreshWeaponMenu();
+}
+function closeWeaponMenu() {
+  weaponPanel.visible = false;
+  if (state === 'menu') { menuPanel.visible = true; refreshMenu(); }
+  clock.getDelta();
+}
+function toggleWeaponMenu() { if (weaponPanel.visible) closeWeaponMenu(); else openWeaponMenu(); }
+function refreshWeaponMenu() {
+  const W = 760;
+  weaponPanel.set((ctx, w) => {
+    text(ctx, '🗡 Waffen-Menü', w / 2, 40, 40, '#fff', 'center', true);
+    text(ctx, renderer.xr.isPresenting ? 'Waffe anklicken → sie kommt in die Hand, mit der du klickst.' : 'Waffe anklicken → du hast sie in der Hand (Schild links).', w / 2, 84, 21, '#cfd8e3');
+    text(ctx, renderer.xr.isPresenting ? 'Loslassen: Griff-Taste drücken und loslassen · Menü auf/zu: A/X' : 'Menü auf/zu: Q · Waffen auch mit 1–4', w / 2, 112, 19, '#9ad');
+    if (weaponMsg) text(ctx, weaponMsg, w / 2, 424, 22, '#7dffa8', 'center', true);
+    text(ctx, `${arsenal.length} Waffen im Raum`, w - 24, 528, 17, '#6b7a90', 'right');
+  }, [
+    ...row(140, 92, WEAPON_ORDER.slice(0, 2).map(id => ({ id: 'w_' + id, label: `${WEAPONS[id].icon} ${WEAPONS[id].name}`, font: 32, onClick: () => pickWeapon(id) })), W),
+    ...row(244, 92, WEAPON_ORDER.slice(2).map(id => ({ id: 'w_' + id, label: `${WEAPONS[id].icon} ${WEAPONS[id].name}`, font: 32, onClick: () => pickWeapon(id) })), W),
+    ...row(350, 50, [
+      { id: 'dummy', label: '🎯 Übungsskelett', font: 23, onClick: () => { spawnDummy(); weaponMsg = 'Übungsskelett steht vor dir – es wehrt sich nicht'; refreshWeaponMenu(); } },
+      { id: 'fetch', label: '🧲 Waffen herholen', font: 23, disabled: !arsenal.length, onClick: () => { placeOnRack(false); weaponMsg = 'Waffen schweben vor dir'; refreshWeaponMenu(); } },
+      { id: 'clearw', label: '🧹 Wegräumen', font: 23, disabled: !arsenal.length, onClick: () => { clearWeapons(); weaponMsg = 'Alle Waffen weggeräumt'; refreshWeaponMenu(); } }
+    ], W, 30, 12),
+    ...row(450, 58, [{ id: 'close', label: state === 'playing' ? '✔ Los geht’s' : '◀ Zurück', font: 30, onClick: closeWeaponMenu }], W, 230)
+  ]);
+}
+function pickWeapon(id) {
+  const h = uiClickHand;
+  giveWeapon(id, h);
+  SFX.grab();
+  weaponMsg = `${WEAPONS[id].icon} ${WEAPONS[id].name} geholt`;
+  refreshWeaponMenu();
+}
+// Übungsskelett: steht vor dir, greift nicht an
+function spawnDummy() {
+  prepareNav(headPos);
+  const e = spawnEnemy(headPos);
+  e.state = 'dummy';
+  const p = inFront(1.5, -0.5, 0); // etwas rechts (das Menü hängt links)
+  e.pos.set(p.x, 0, p.z);
+  e.y = 0;
+  e.body.position.y = 0;
+  e.yaw = Math.atan2(headPos.x - p.x, headPos.z - p.z);
+  e.root.position.copy(e.pos);
+  e.root.rotation.y = e.yaw;
+}
+
+// =============================================================================
 // Steuerung am PC (zum Testen ohne Brille)
 // =============================================================================
 const mouseNdc = new THREE.Vector2();
@@ -1478,12 +1568,12 @@ let lookYaw = 0, lookPitch = -0.2, rightDrag = false, lastX = 0, lastY = 0;
 const keys = new Set();
 let deskW = null, deskShield = null, deskDraw = 0, deskDrawing = false;
 // PC: Waffe vor die Kamera nehmen (Schild in die linke Hand, andere Waffen rechts)
-function equipDesk(id) {
-  ensureArsenal();
-  const w = arsenal.find(x => x.id === id);
+function equipDesk(idOrW) {
+  const w = typeof idOrW === 'string' ? (arsenal.find(x => x.id === idOrW && !x.thrown) || newWeapon(idOrW)) : idOrW;
   if (!w) return;
   if (w.def.shield) {
-    if (deskShield) { const old = deskShield; deskShield = null; placeOnRackOne(old); return; }
+    if (deskShield === w) { deskShield = null; placeOnRackOne(w); return; }
+    if (deskShield) { const old = deskShield; deskShield = null; placeOnRackOne(old); }
     freeWeapon(w); w.floating = false; w.desk = true; w.root.visible = true;
     camera.add(w.root); w.root.position.set(-0.42, -0.42, -0.62); w.root.rotation.set(0, 0.45, 0);
     deskShield = w; SFX.grab(); return;
@@ -1497,12 +1587,16 @@ function equipDesk(id) {
   deskW = w;
   SFX.grab();
 }
-function placeOnRackOne(w) {
+function placeOnRackOne(w, fresh = false) {
   freeWeapon(w);
   w.floating = true;
   w.root.visible = true;
-  if (!w.home) w.home = inFront(0.55, 0, 1.0);
-  if (!w.homeYaw) w.homeYaw = headYaw();
+  if (!w.home || fresh) { // freier Platz vor dir (leicht versetzt, falls dort schon etwas schwebt)
+    const n = arsenal.filter(x => x.floating && x !== w).length;
+    const xr = renderer.xr.isPresenting;
+    w.home = inFront(xr ? 0.45 : 1.1, ((n % 5) - 2) * 0.22, xr ? Math.max(0.9, headPos.y - 0.45) : 1.2);
+    w.homeYaw = headYaw();
+  }
   poseFloating(w, elapsed);
 }
 // PC-Angriff: Klick = Schwung in Blickrichtung (Fadenkreuz)
@@ -1563,7 +1657,7 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
     if (hit) { const w = ws.find(x => { let o = hit.object; while (o) { if (o === x.root) return true; o = o.parent; } return false; }); if (w) { equipDesk(w.id); return; } }
   }
   if (deskW && deskW.def.bow) { deskDrawing = true; deskDraw = 0; SFX.click(500, 0.3, 0.05); return; }
-  if (state === 'playing') deskAttack();
+  if (state === 'playing' || state === 'menu') deskAttack();
 });
 window.addEventListener('pointerup', (e) => {
   if (e.button === 2) rightDrag = false;
@@ -1585,6 +1679,7 @@ window.addEventListener('keydown', (e) => {
     const n = parseInt(e.key, 10);
     if (n >= 1 && n <= 4) equipDesk(WEAPON_ORDER[n - 1]);
     if (e.key === 'f' || e.key === 'F') deskThrowDagger();
+    if ((e.key === 'q' || e.key === 'Q') && (state === 'playing' || state === 'menu')) toggleWeaponMenu();
   }
 });
 window.addEventListener('keyup', (e) => keys.delete(e.code));
@@ -1650,7 +1745,6 @@ renderer.xr.addEventListener('sessionend', () => {
   setupPanel.visible = false;
   buildDemoRoom();
   enterMenu();
-  placeOnRack();
 });
 
 // =============================================================================
@@ -1668,7 +1762,7 @@ function refreshPause() {
     ...row(120, 70, [{ id: 'resume', label: '▶ Weiter', font: 36, onClick: () => setPaused(false) }], 630, 60),
     ...row(206, 62, [{ id: 'psettings', label: '⚙ Einstellungen', font: 28, onClick: () => { pausePanel.visible = false; menuView = 'settings'; menuPanel.visible = true; menuPanel.place(0.95, 0, -0.1); refreshMenu(); } }], 630, 60),
     ...row(284, 62, [
-      { id: 'rack', label: '🗡 Waffen holen', font: 26, onClick: () => { placeOnRack(true); setPaused(false); } },
+      { id: 'rack', label: '🗡 Waffen-Menü', font: 26, onClick: () => { setPaused(false); openWeaponMenu(); } },
       { id: 'quit', label: '🏠 Runde beenden', font: 26, onClick: () => { setPaused(false); endRound(false); } }
     ], 630, 40)
   ]);
@@ -1680,6 +1774,7 @@ function setPaused(on) {
   paused = on;
   setAudioPaused(on);
   if (on) {
+    weaponPanel.visible = false;
     refreshPause();
     pausePanel.visible = true;
     pausePanel.place(0.9, 0, -0.1);
@@ -1722,7 +1817,6 @@ camera.rotation.set(lookPitch, lookYaw, 0, 'YXZ');
 camera.updateMatrixWorld(true);
 buildDemoRoom();
 enterMenu();
-placeOnRack();
 
 // Fehler werden gemeldet, aber das Spiel läuft weiter (sonst friert die VR-Ansicht ein)
 const errorEl = document.createElement('div');
@@ -1796,8 +1890,9 @@ function frameInner() {
 
 // Für automatisierte Tests
 applySettings();
+window.__cam = camera;
 window.__game = {
-  renderer, room, hands, enemies, arsenal, uiPanels, get playerHp() { return playerHp; }, set playerHp(v) { playerHp = v; }, get kills() { return kills; }, placeOnRack, equipDesk, deskAttack, enemyStrike, teleport: (x, z) => { camera.position.x = x; camera.position.z = z; }, settings, setup, menuPanel, setupPanel, pausePanel,
+  renderer, room, hands, enemies, arsenal, uiPanels, get playerHp() { return playerHp; }, set playerHp(v) { playerHp = v; }, get kills() { return kills; }, placeOnRack, equipDesk, giveWeapon, openWeaponMenu, closeWeaponMenu, get weaponPanel() { return weaponPanel; }, deskAttack, enemyStrike, teleport: (x, z) => { camera.position.x = x; camera.position.z = z; }, settings, setup, menuPanel, setupPanel, pausePanel,
   get state() { return state; }, get paused() { return paused; }, get errors() { return errorCount; }, get floorOffset() { return floorOffset; },
   startPressed, enterMenu, enterSetup, finishSetup, setPaused, spawnEnemy: () => spawnEnemy(headPos), setTool, setupTriggerDown, setupTriggerUp,
   alignToLine, loadSlot, saveSlot, serializeRoom, surfaceAt, updateSetup

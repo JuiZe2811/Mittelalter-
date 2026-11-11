@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import { surfacesOf } from './room.js?v=5';
-import { buildNav, findPath, walkable, nearestWalkable, groundAt, STEP } from './nav.js?v=5';
-import { SFX3D } from './sfx.js?v=5';
-import { puff, addDebris, burst } from './effects.js?v=5';
+import { surfacesOf } from './room.js?v=6';
+import { buildNav, findPath, walkable, nearestWalkable, groundAt, STEP } from './nav.js?v=6';
+import { SFX3D } from './sfx.js?v=6';
+import { puff, addDebris, burst } from './effects.js?v=6';
 
 // =============================================================================
 // Gegner: normale Skelette (keine Bosse, keine Riesen).

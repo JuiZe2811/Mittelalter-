@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import { hitTest, damageEnemy } from './enemies.js?v=5';
-import { roomOccluders } from './room.js?v=5';
-import { SFX } from './sfx.js?v=5';
-import { sparks, puff } from './effects.js?v=5';
+import { hitTest, damageEnemy } from './enemies.js?v=6';
+import { roomOccluders } from './room.js?v=6';
+import { SFX } from './sfx.js?v=6';
+import { sparks, puff } from './effects.js?v=6';
 
 // =============================================================================
 // Waffen: Dolch, Langschwert, Schild, Bogen (+ Pfeile).
