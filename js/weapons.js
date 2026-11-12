@@ -1,9 +1,9 @@
 import * as THREE from 'three';
-import { strikeTest, applyHit, boneOf } from './enemies.js?v=11';
-import { roomOccluders } from './room.js?v=11';
-import { SFX } from './sfx.js?v=11';
-import { sparks, puff } from './effects.js?v=11';
-import { makeArrowMesh, ARROW_LEN } from './arrow.js?v=11';
+import { strikeTest, applyHit, boneOf } from './enemies.js?v=12';
+import { roomOccluders } from './room.js?v=12';
+import { SFX } from './sfx.js?v=12';
+import { sparks, puff } from './effects.js?v=12';
+import { makeArrowMesh, ARROW_LEN } from './arrow.js?v=12';
 export { makeArrowMesh };
 
 // =============================================================================

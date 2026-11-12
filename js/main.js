@@ -1,18 +1,18 @@
 import * as THREE from 'three';
-import { VERSION } from './version.js?v=11';
+import { VERSION } from './version.js?v=12';
 import { ARButton } from 'three/addons/webxr/ARButton.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { makePanel, panelBg, roundRect } from './util.js?v=11';
-import { SFX, SFX_PLAYER, ensureAudio, setListener, setVolumes, setAudioPaused } from './sfx.js?v=11';
-import { segPoint, segSeg } from './geom.js?v=11';
-import { stepPhysics, addDynamic, removeDynamic, localBoxOf } from './physics.js?v=11';
-import { initEnemies, spawnEnemy, updateEnemies, clearEnemies, prepareNav, aliveCount, enemies, strikeTest, applyHit, shoveEnemy, hitShield, teamOpening, notifyShot, beatWeapon, pushEnemy, bindTest, bindPush, enemyWeaponSeg, player, opts as combatOpts, pickType, ENEMY_TYPES, TYPE_ORDER, warmupGroup } from './enemies.js?v=11';
-import { groundAt } from './nav.js?v=11';
-import { WEAPON_ORDER, WEAPONS, createWeapon, setBowString, setXbowString, xbowPull, initWeapons, shootArrow, throwWeapon, updateFlying, clearFlying, updateChain, makeArrowMesh } from './weapons.js?v=11';
-import { createHolsters, updateHolsters, slotNear, fits, holsterPose } from './holster.js?v=11';
-import { setWarn, surfaceDistance } from './room.js?v=11';
-import { room, addWall, addBox, makeWall, makeBox, rotateBox, removeSurface, clearRoom, setEditMode, suggestYaw, surfacesOf, importDetectedPlanes, saveRoom, loadRoom, hasSavedRoom, surfaceName, serializeRoom, deserializeRoom, roomSlots, saveRoomSlot, loadRoomSlot, addOpening, makeOpening, roomOccluders, setAtmosphere, closeRoomGaps, closeRoom, openWallEnds } from './room.js?v=11';
-import { initEffects, headRef, floatingText, updateEffects, updateDebris, fx, clearDebris, sparks, warmText, burst } from './effects.js?v=11';
+import { makePanel, panelBg, roundRect } from './util.js?v=12';
+import { SFX, SFX_PLAYER, ensureAudio, setListener, setVolumes, setAudioPaused } from './sfx.js?v=12';
+import { segPoint, segSeg } from './geom.js?v=12';
+import { stepPhysics, addDynamic, removeDynamic, localBoxOf } from './physics.js?v=12';
+import { initEnemies, spawnEnemy, updateEnemies, clearEnemies, prepareNav, aliveCount, enemies, strikeTest, applyHit, shoveEnemy, hitShield, teamOpening, notifyShot, beatWeapon, pushEnemy, bindTest, bindPush, enemyWeaponSeg, player, opts as combatOpts, pickType, ENEMY_TYPES, TYPE_ORDER, warmupGroup, enemyParried, corpseTest, pushCorpse, grabFeedback, endGrab, ragOpts, ragStats, aiOpts, PERSONAS, PERSONA_ORDER, debugApi, describe, yieldAction } from './enemies.js?v=12';
+import { groundAt } from './nav.js?v=12';
+import { WEAPON_ORDER, WEAPONS, createWeapon, setBowString, setXbowString, xbowPull, initWeapons, shootArrow, throwWeapon, updateFlying, clearFlying, updateChain, makeArrowMesh } from './weapons.js?v=12';
+import { createHolsters, updateHolsters, slotNear, fits, holsterPose } from './holster.js?v=12';
+import { setWarn, surfaceDistance } from './room.js?v=12';
+import { room, addWall, addBox, makeWall, makeBox, rotateBox, removeSurface, clearRoom, setEditMode, suggestYaw, surfacesOf, importDetectedPlanes, saveRoom, loadRoom, hasSavedRoom, surfaceName, serializeRoom, deserializeRoom, roomSlots, saveRoomSlot, loadRoomSlot, addOpening, makeOpening, roomOccluders, setAtmosphere, closeRoomGaps, closeRoom, openWallEnds } from './room.js?v=12';
+import { initEffects, headRef, floatingText, updateEffects, updateDebris, fx, clearDebris, sparks, warmText, burst } from './effects.js?v=12';
 const clamp = THREE.MathUtils.clamp;
 const hyp = (a, b, c = 0) => Math.sqrt(a * a + b * b + c * c); // schneller als Math.hypot und ohne Speicher-Müll
 
@@ -217,7 +217,7 @@ function updateHandsXR(dt) {
     const wasHolding = !!h.held;
     // Zeigestrahl (im Einrichtungsmodus als Laser bis zum Boden / zur Wand)
     let pt = null;
-    if ((free || weaponPanel.visible) && !(setup.drag && setup.drag.src === h)) pt = pointerTarget(h);
+    if ((free || weaponPanel.visible || debugPanel.visible) && !(setup.drag && setup.drag.src === h)) pt = pointerTarget(h);
     let len = pt ? pt.dist : 2;
     const showPtr = (free && (pt || state !== 'playing')) || (pt && pt.kind === 'ui');
     if (state === 'setup' && free && !pt && setup.tool && setup.tool !== 'floor') {
@@ -404,7 +404,10 @@ const SETTINGS_TABS = {
   kampf: { label: '⚔ Kampf', items: [
     { key: 'difficulty', label: 'Schwierigkeit', opts: [['easy', 'Leicht'], ['normal', 'Normal'], ['hard', 'Schwer']] },
     { key: 'popups', label: 'Kampf-Texte (Parade!, Bein verletzt …)', opts: onOff },
-    { key: 'blood', label: 'Blut', opts: [[0, 'Aus'], [1, 'An']] }
+    { key: 'blood', label: 'Blut', opts: [[0, 'Aus'], [1, 'An']] },
+    { key: 'ragdoll', label: 'Ragdoll-Physik bei Stürzen', opts: onOff },
+    { key: 'ragMax', label: 'Ragdolls gleichzeitig (Leistung)', opts: [[1, '1'], [2, '2'], [3, '3'], [4, '4']] },
+    { key: 'devMenu', label: 'Test-Menü (Entwickler)', opts: onOff }
   ] },
   bedienung: { label: '✊ Bedienung', items: [
     { key: 'grip', label: 'Griff-Taste', opts: [['hold', 'Halten'], ['toggle', 'Tippen = festhalten']] },
@@ -436,9 +439,11 @@ const SETTINGS_TABS = {
 const SETTINGS_DEFAULT = {
   master: 9, sfx: 10, music: 6, voices: 10, announcer: 10, announcerVoice: 'deep',
   haptics: 1, popups: true, difficulty: 'normal', blood: 1, grip: 'hold', gripAngle: 0, gripSpace: true, holsters: true, quiver: true, height: 1.75, hipOffset: 0, leftHanded: false, safety: 0.5, weight: 1, trails: true, throwBoost: 1.3, fps: false,
-  quality: 'balanced', shadows: false, particles: 1, dust: true, frameRate: 90, autoPerf: true
+  quality: 'balanced', shadows: false, particles: 1, dust: true, frameRate: 90, autoPerf: true,
+  ragdoll: true, ragMax: 2, devMenu: false
 };
 const settings = Object.assign({}, SETTINGS_DEFAULT, load('burg-einstellungen', {}));
+let debugPanel = null, dbgOverlay = false; // Test-Menü (siehe unten)
 let voiceOn = settings.announcer > 0;
 function applySettings() {
   setVolumes({ master: settings.master / 10, sfx: settings.sfx / 10, music: settings.music / 10, voices: settings.voices / 10 });
@@ -449,6 +454,8 @@ function applySettings() {
   // Schwierigkeit: Schaden, Reaktionsvermögen (Parieren, Schild, Finten) und Tempo der Gegner
   const D = { easy: { dmg: 0.6, react: 0.7, speed: 0.88 }, normal: { dmg: 1, react: 1, speed: 1 }, hard: { dmg: 1.4, react: 1.25, speed: 1.1 } }[settings.difficulty] || { dmg: 1, react: 1, speed: 1 };
   Object.assign(combatOpts, D, { texts: settings.popups });
+  ragOpts.enabled = !!settings.ragdoll; ragOpts.max = settings.ragMax || 2;
+  if (!settings.devMenu && debugPanel) { debugPanel.visible = false; dbgOverlay = false; }
   if (shadowsOn !== settings.shadows) setShadows(settings.shadows);
   dust.visible = settings.dust;
   applyQuality();
@@ -1385,7 +1392,13 @@ function meleeUpdate(w, dt, h) {
     if (hit && (hit.kind !== 'body' || !w.swingHits.has(hit.e))) break;
     hit = null;
   }
-  if (!hit) return;
+  if (!hit) { // vielleicht ein Gefallener: der Körper wird angestoßen (Ragdoll)
+    if (w.tipSpeed > 3 && (frameNo & 1) === 0) {
+      const c = corpseTest(s.base, s.tip);
+      if (c && !w.swingHits.has(c.e) && pushCorpse(c.e, c.point, w.tipVel.clone().normalize(), (M.slash || M.blunt || 12) * clamp(w.tipSpeed / 4, 0.4, 1.5))) { w.swingHits.add(c.e); SFX.thunk(); if (h) pulse(h, 0.4, 30); }
+    }
+    return;
+  }
   // Geschwindigkeit genau am Kontaktpunkt: nahe am Griff trifft es viel schwächer als mit der Spitze
   const u = clamp(hit.point.clone().sub(s.base).dot(axis) / Math.max(0.05, s.tip.distanceTo(s.base)), 0, 1);
   _cv.lerpVectors(w.baseVel, w.tipVel, u);
@@ -1433,7 +1446,9 @@ function bindUpdate(w, s, dt, h) {
   if (!w.binding) { w.binding = b.e; SFX.click(2600, 0.25, 0.05); if (h) pulse(h, 0.4, 30); } // Klingen berühren sich
   const push = w.tipVel.clone().multiplyScalar(dt * (w.twoHand ? 1.4 : 1));
   if ((frameNo & 3) === 0 && h) pulse(h, 0.15, 15);
-  if (bindPush(b.e, push, dt) === 'beaten') { SFX.clang(); if (h) pulse(h, 0.8, 60); teamOpening(null); }
+  const br = bindPush(b.e, push, dt);
+  if (br === 'beaten') { SFX.clang(); if (h) pulse(h, 0.8, 60); teamOpening(null); }
+  else if (br === 'disarmed') { SFX.clang(); if (h) pulse(h, 1, 90); if (settings.popups) floatingText('Waffe herausgewunden!', b.point.clone().add(new THREE.Vector3(0, 0.2, 0)), '#7dffa8'); }
 }
 // Morgenstern: die Kugel trifft, wenn sie schnell genug schwingt – auch über den Rand von Schilden hinweg
 function flailUpdate(w, dt, h) {
@@ -1523,7 +1538,7 @@ function enemyBlocked(hit, h, shieldDmg = 3, power = 10, dir = null, w = null) {
   if (h) pulse(h, 1, 80);
   let text = null, color = '#cfd8e3';
   if (hit.kind === 'weapon') { // Klinge an Klinge: Waffe des Gegners wegschlagen, oder es prallt ab
-    const res = beatWeapon(hit.e, power, dir || tmpV2.subVectors(hit.point, headPos).normalize());
+    const res = beatWeapon(hit.e, power, dir || tmpV2.subVectors(hit.point, headPos).normalize(), hit.point);
     if (res === 'disarmed') { text = 'Entwaffnet!'; color = '#7dffa8'; }
     else if (res === 'beaten') { text = 'Klinge weggeschlagen!'; color = '#7dffa8'; }
     else if (res === 'clash') text = 'Klingen prallen aufeinander';
@@ -1533,6 +1548,7 @@ function enemyBlocked(hit, h, shieldDmg = 3, power = 10, dir = null, w = null) {
     // Schild nimmt Schaden – Äxte und Hämmer zertrümmern ihn
     const broke = hit.kind === 'shield' && hitShield(hit.e, shieldDmg, hit.point);
     if (!broke) text = hit.kind === 'shield' ? (shieldDmg >= 20 ? 'Schild splittert!' : 'Schild!') : 'Pariert!';
+    if (hit.kind === 'parry') enemyParried(hit.e); // er entscheidet: Riposte, Stich aus der Bindung, Tritt oder Rückzug
     if (hit.e.cool > 0.25 && Math.random() < 0.6) hit.e.cool = 0.25; // er nutzt die Gelegenheit zum Gegenangriff …
     teamOpening(hit.e);                                              // … und seine Verbündeten ebenfalls
   }
@@ -1714,6 +1730,32 @@ Object.assign(player, {
   defeated(e, how) {
     kills++;
     if (how === 'fled' && settings.popups) floatingText(`${e.name} ist geflohen`, inFront(1.2, 0, headPos.y), '#9ad');
+    if (how === 'yield' && settings.popups) floatingText(`${e.name} ergibt sich`, inFront(1.2, 0, headPos.y), '#fff');
+  },
+  // ein Gegner packt die Waffe: Hinweis + Vibration
+  grabbed(e, w) {
+    w.grab = { e, u: e.grab.u };
+    if (w.holder) pulse(w.holder, 1, 120);
+    if (settings.popups) floatingText('Gepackt! Zurückziehen oder Klinge drehen', inFront(0.9, 0, headPos.y - 0.25), '#ffb04a');
+  },
+  // er reißt dir die Waffe weg: ein Entwaffneter nimmt sie, sonst fällt sie zu Boden
+  disarmed(e, w) {
+    const h = w.holder; w.grab = null;
+    if (h) pulse(h, 1, 160);
+    SFX.clang();
+    const id = FLOOR_IDS[w.id];
+    if (id && e.weaponId === 'fist') { removeWeapon(w); return id; }
+    makeLooseW(w, tmpV.subVectors(e.pos, headPos).setY(0.5).normalize().multiplyScalar(1.5));
+    return null;
+  },
+  say(e, line) { // Stimme des Gegners (Sprachausgabe des Browsers, falls vorhanden)
+    if (!window.speechSynthesis || settings.voices <= 0) return;
+    try {
+      const u = new SpeechSynthesisUtterance(line);
+      u.lang = 'de-DE'; u.pitch = e.persona === 'fearful' ? 1.3 : 0.8; u.rate = 1.1; u.volume = settings.voices / 10;
+      const v = speechSynthesis.getVoices().find(x => x.lang && x.lang.startsWith('de')); if (v) u.voice = v;
+      speechSynthesis.speak(u);
+    } catch { /* keine Sprachausgabe */ }
   }
 });
 // Kopf, Schilde und Klingen des Spielers für die Gegner bereitstellen (jedes Bild)
@@ -1836,9 +1878,35 @@ function poseHeld(w, dt) {
       w.smoothQ.copy(w.root.quaternion);
     }
   }
+  // Ein Gegner hält die Waffe fest: die virtuelle Waffe bleibt an seiner Hand hängen (Widerstand),
+  // der Controller bleibt frei. Ziehen oder Drehen befreit sie – abhängig vom Hebel.
+  if (w.grab) grabConstraint(w, h, dt);
   // Rückprall nach einem Treffer oder Block: die Klinge federt kurz zurück
   if (w.kickT > 0) { w.kickT = Math.max(0, w.kickT - dt); w.root.rotateX(w.kickAmt * Math.sin(w.kickT / 0.16 * Math.PI)); }
   w.root.updateMatrixWorld(true);
+}
+const _gpt = new THREE.Vector3(), _goff = new THREE.Vector3(), _gax = new THREE.Vector3(), _gv = new THREE.Vector3(), _gq = new THREE.Quaternion();
+// Bewegung der echten Hand am gepackten Punkt (aus der Zielhaltung der Waffe, unabhängig vom Controller-Typ)
+function grabConstraint(w, h, dt) {
+  const G = w.grab, e = G.e, g = e.grab;
+  if (!g || g.w !== w || g.phase !== 'hold') { w.grab = null; return; }
+  _gpt.copy(w.ga).lerp(w.gb, G.u).applyQuaternion(w.root.quaternion).add(w.root.position);
+  _gax.copy(w.gb).sub(w.ga).normalize().applyQuaternion(w.root.quaternion);
+  let pull = 0, slide = 0, twist = 0;
+  if (G.prevP && dt > 0) {
+    _gv.subVectors(_gpt, G.prevP).divideScalar(dt);
+    _goff.subVectors(_gpt, g.pt).normalize();
+    pull = _gv.dot(_goff); slide = Math.abs(_gv.dot(_gax));
+    _gq.copy(G.prevQ).invert().premultiply(w.root.quaternion); // Drehung seit dem letzten Bild
+    const ang = 2 * Math.acos(clamp(Math.abs(_gq.w), 0, 1)), sn = Math.sqrt(Math.max(1e-9, 1 - _gq.w * _gq.w));
+    twist = Math.abs((_gq.x * _gax.x + _gq.y * _gax.y + _gq.z * _gax.z) / sn) * ang / dt;
+  }
+  (G.prevP || (G.prevP = new THREE.Vector3())).copy(_gpt); (G.prevQ || (G.prevQ = new THREE.Quaternion())).copy(w.root.quaternion);
+  _goff.subVectors(g.pt, _gpt);
+  const tension = _goff.length();
+  w.root.position.addScaledVector(_goff, 0.85);
+  grabFeedback(e, tension, twist, pull, slide);
+  if ((frameNo & 3) === 0) pulse(h, Math.min(1, 0.3 + tension * 2.5), 25);
 }
 const kickWeapon = (w, amt) => { if (w) { w.kickT = 0.16; w.kickAmt = amt; } };
 const stopWeapon = (w) => { if (w && w.holder) { w.contactQ = w.root.quaternion.clone(); w.contactT = 0.18; } };
@@ -2135,7 +2203,8 @@ function refreshWeaponMenu() {
     ], W, 30, 12),
     ...row(560, 40, [
       { id: 'clearw', label: '🧹 Waffen weg', font: 19, disabled: !arsenal.length, onClick: () => { clearWeapons(); weaponMsg = 'Alle Waffen weggeräumt'; refreshWeaponMenu(); } },
-      { id: 'cleare', label: '🧹 Gegner weg', font: 19, disabled: !enemies.length || state === 'playing', onClick: () => { clearEnemies(); weaponMsg = 'Alle Gegner entfernt'; refreshWeaponMenu(); } }
+      { id: 'cleare', label: '🧹 Gegner weg', font: 19, disabled: !enemies.length || state === 'playing', onClick: () => { clearEnemies(); weaponMsg = 'Alle Gegner entfernt'; refreshWeaponMenu(); } },
+      ...(settings.devMenu ? [{ id: 'wdebug', label: '🛠 Test-Menü', font: 19, onClick: () => { closeWeaponMenu(); openDebugMenu(); } }] : [])
     ], W, 30, 12),
     ...row(636, 58, [{ id: 'close', label: state === 'playing' ? '✔ Los geht’s' : '◀ Zurück', font: 30, onClick: closeWeaponMenu }], W, 230)
   ]);
@@ -2154,10 +2223,135 @@ function pickWeapon(id) {
   refreshWeaponMenu();
 }
 // Übungsgegner: „passiv“ steht vor dir und wehrt sich nicht · sonst ein Duell gegen einen kämpfenden Gegner
-function spawnTrainer(passive) {
+function spawnTrainer(passive, persona = null) {
   prepareNav(headPos);
   const p = inFront(passive ? 1.5 : 2.7, -0.5, 0); // etwas rechts (das Menü hängt links)
-  return spawnEnemy(headPos, { type: trainType, at: p, passive });
+  return spawnEnemy(headPos, { type: trainType, at: p, passive, persona });
+}
+
+// =============================================================================
+// Test-Menü (Entwickler): Gegner/Persönlichkeit wählen, KI-Regler, Physik-Schalter, Tests auslösen,
+// Anzeige über den Gegnern. Nur sichtbar, wenn in den Einstellungen „Test-Menü“ an ist. Das Spiel läuft weiter.
+// =============================================================================
+debugPanel = new UIPanel(1.0, 0.98, 760);
+debugPanel.border = '#c9a0ff';
+debugPanel.visible = false;
+let dbgPersona = 'elite', dbgMsg = '', dbgT = 0;
+const AI_SLIDERS = [['diff', 'Schwierigkeit'], ['aggro', 'Aggression'], ['react', 'Reaktion'], ['adapt', 'Lernfähigkeit'], ['morale', 'Moral'], ['defense', 'Verteidigung']];
+// Ziel der Test-Knöpfe: der Gegner, auf den du am ehesten schaust (lebend oder ergeben)
+function dbgTarget(filter = (e) => e.state !== 'dead') {
+  let best = null, bs = Infinity;
+  getViewCamera().getWorldDirection(tmpV3);
+  for (const e of enemies) {
+    if (!filter(e)) continue;
+    const to = tmpV2.set(e.pos.x - headPos.x, 0, e.pos.z - headPos.z), d = to.length() || 1e-3;
+    const ang = Math.acos(clamp((to.x * tmpV3.x + to.z * tmpV3.z) / (d * (Math.hypot(tmpV3.x, tmpV3.z) || 1)), -1, 1));
+    const sc = d + ang * 2.5;
+    if (sc < bs) { bs = sc; best = e; }
+  }
+  return best;
+}
+function openDebugMenu() {
+  if (!settings.devMenu) return;
+  if (paused) setPaused(false);
+  weaponPanel.visible = false;
+  debugPanel.visible = true;
+  if (renderer.xr.isPresenting) debugPanel.place(0.8, -0.75, -0.15); else debugPanel.place(1.5, -0.35, -0.1);
+  refreshDebug();
+}
+function closeDebugMenu() { debugPanel.visible = false; }
+function dbgDo(label, fn) {
+  const e = fn();
+  dbgMsg = e === false ? `${label}: kein passender Gegner` : `${label} ✓`;
+  refreshDebug();
+}
+function refreshDebug() {
+  if (!debugPanel.visible) return;
+  const W = 760, T = ENEMY_TYPES[trainType], P = PERSONAS[dbgPersona], tgt = dbgTarget(), yt = dbgTarget(e => e.state === 'yield');
+  const fps = Math.round(fpsEma), aiMs = prof.n ? (prof.parts.gegner || 0) / prof.n : 0;
+  const pct = (v) => `${Math.round(v * 100)}%`;
+  const btns = [
+    ...row(104, 46, [
+      { id: 'dtype', label: `◀ ${T.name} ▶`, font: 17, onClick: () => { trainType = TYPE_ORDER[(TYPE_ORDER.indexOf(trainType) + 1) % TYPE_ORDER.length]; refreshDebug(); } },
+      { id: 'dpers', label: `◀ ${P.name} ▶`, font: 17, onClick: () => { dbgPersona = PERSONA_ORDER[(PERSONA_ORDER.indexOf(dbgPersona) + 1) % PERSONA_ORDER.length]; refreshDebug(); } },
+      { id: 'dspawn', label: '⚔ Kämpfer', font: 17, onClick: () => dbgDo('Gegner erzeugt', () => spawnTrainer(false, dbgPersona)) },
+      { id: 'dpass', label: '🎯 Passiv', font: 17, onClick: () => dbgDo('Passiver Gegner', () => spawnTrainer(true, dbgPersona)) },
+      { id: 'dset', label: '→ Ziel', font: 17, disabled: !tgt, onClick: () => dbgDo(`${P.name} gesetzt`, () => debugApi.persona(dbgTarget(), dbgPersona)) }
+    ], W, 20, 8)
+  ];
+  AI_SLIDERS.forEach(([k], i) => {
+    const x = 20 + (i % 2) * 370, y = 196 + Math.floor(i / 2) * 50;
+    btns.push({ id: 'm_' + k, label: '−', font: 26, x: x + 196, y, w: 44, h: 42, disabled: aiOpts[k] <= 0.25, onClick: () => { aiOpts[k] = Math.max(0.25, +(aiOpts[k] - 0.25).toFixed(2)); refreshDebug(); } });
+    btns.push({ id: 'p_' + k, label: '+', font: 26, x: x + 316, y, w: 44, h: 42, disabled: aiOpts[k] >= 2, onClick: () => { aiOpts[k] = Math.min(2, +(aiOpts[k] + 0.25).toFixed(2)); refreshDebug(); } });
+  });
+  btns.push(...row(356, 46, [
+    { id: 'drag', label: `Ragdoll: ${settings.ragdoll ? 'An' : 'Aus'}`, font: 18, active: settings.ragdoll, onClick: () => { setSetting('ragdoll', !settings.ragdoll); refreshDebug(); } },
+    { id: 'dmax', label: `Max. aktiv: ${settings.ragMax}`, font: 18, onClick: () => { setSetting('ragMax', settings.ragMax % 4 + 1); refreshDebug(); } },
+    { id: 'dimp', label: `Impulse: ${ragOpts.showImpulse ? 'An' : 'Aus'}`, font: 18, active: ragOpts.showImpulse, onClick: () => { ragOpts.showImpulse = !ragOpts.showImpulse; refreshDebug(); } },
+    { id: 'dovl', label: `Anzeige: ${dbgOverlay ? 'An' : 'Aus'}`, font: 18, active: dbgOverlay, onClick: () => { dbgOverlay = !dbgOverlay; refreshDebug(); } }
+  ], W, 20, 8));
+  btns.push(...row(432, 46, [
+    { id: 'dko', label: 'Zu Boden', font: 17, disabled: !tgt, onClick: () => dbgDo('Sturz', () => debugApi.knockdown(dbgTarget())) },
+    { id: 'dst', label: 'Stolpern', font: 17, disabled: !tgt, onClick: () => dbgDo('Stolpern', () => debugApi.stumble(dbgTarget())) },
+    { id: 'ddis', label: 'Entwaffnen', font: 17, disabled: !tgt, onClick: () => dbgDo('Entwaffnet', () => debugApi.disarm(dbgTarget())) },
+    { id: 'dgrab', label: 'Packt Waffe', font: 17, disabled: !tgt, onClick: () => dbgDo('Greift nach deiner langsamen Klinge in Reichweite', () => debugApi.grab(dbgTarget())) },
+    { id: 'dyield', label: 'Ergeben', font: 17, disabled: !tgt, onClick: () => dbgDo('Ergibt sich', () => debugApi.surrender(dbgTarget())) }
+  ], W, 20, 8));
+  btns.push(...row(526, 46, [
+    { id: 'yaway', label: 'Wegschicken', font: 17, disabled: !yt, onClick: () => dbgDo('Weggeschickt', () => yieldAction(dbgTarget(e => e.state === 'yield'), 'away')) },
+    { id: 'yfight', label: 'Wieder kämpfen', font: 17, disabled: !yt, onClick: () => dbgDo('Kämpft wieder', () => yieldAction(dbgTarget(e => e.state === 'yield'), 'fight')) },
+    { id: 'ydis', label: `Entwaffnet: ${yt && yt.noRearm ? 'Ja' : 'Nein'}`, font: 17, disabled: !yt, onClick: () => dbgDo('Umgeschaltet', () => yieldAction(dbgTarget(e => e.state === 'yield'), 'disarmed')) },
+    { id: 'yrem', label: 'Entfernen', font: 17, disabled: !yt, onClick: () => dbgDo('Entfernt', () => yieldAction(dbgTarget(e => e.state === 'yield'), 'remove')) }
+  ], W, 20, 8));
+  btns.push(...row(600, 48, [
+    { id: 'dreset', label: '↺ KI-Regler', font: 18, onClick: () => { for (const [k] of AI_SLIDERS) aiOpts[k] = 1; dbgMsg = 'KI-Regler zurückgesetzt'; refreshDebug(); } },
+    { id: 'dclear', label: '🧹 Gegner weg', font: 18, disabled: !enemies.length, onClick: () => { clearEnemies(); dbgMsg = 'Alle Gegner entfernt'; refreshDebug(); } },
+    { id: 'dclose', label: '✖ Schließen', font: 18, onClick: closeDebugMenu }
+  ], W, 20, 8));
+  debugPanel.set((ctx, w) => {
+    text(ctx, '🛠 Test-Menü', w / 2, 30, 30, '#fff', 'center', true);
+    text(ctx, `Ragdolls aktiv ${ragStats.active}/${ragOpts.max} · eingefroren ${ragStats.frozen} · vereinfacht ${ragStats.fallback} · ${fps} fps · KI+Physik der Gegner ${aiMs.toFixed(2)} ms`, w / 2, 62, 15, '#cfd8e3');
+    text(ctx, tgt ? `Ziel: ${tgt.name} · ${PERSONAS[tgt.persona].name} · Moral ${Math.round(tgt.morale)}` : 'Ziel: kein Gegner im Blick', w / 2, 84, 15, tgt ? PERSONAS[tgt.persona].color : '#8796ad');
+    text(ctx, 'KI-Regler (alle Gegner):', 20, 176, 16, '#9ad', 'left', true);
+    AI_SLIDERS.forEach(([k, label], i) => {
+      const x = 20 + (i % 2) * 370, y = 196 + Math.floor(i / 2) * 50;
+      text(ctx, label, x, y + 22, 18, '#e6edf5', 'left');
+      text(ctx, pct(aiOpts[k]), x + 278, y + 22, 18, '#ffd36a', 'center', true);
+    });
+    text(ctx, 'Physik · Anzeige:', 20, 344, 16, '#9ad', 'left', true);
+    text(ctx, 'Test am Ziel-Gegner:', 20, 420, 16, '#9ad', 'left', true);
+    text(ctx, yt ? `Ergebener: ${yt.name} (${PERSONAS[yt.persona].name})` : 'Ergebene: keiner', 20, 512, 16, '#9ad', 'left', true);
+    if (tgt) {
+      const D = describe(tgt);
+      text(ctx, `${D.st} · ${D.phys}${D.atk ? ' · Hieb: ' + D.atk : ''}`, w / 2, 668, 15, '#e6edf5');
+      text(ctx, `Muster: ${D.pat.join(', ') || '–'}${D.why ? ' · ' + D.why : ''}`, w / 2, 690, 15, '#cfd8e3');
+    }
+    if (dbgMsg) text(ctx, dbgMsg, w / 2, 716, 16, '#7dffa8', 'center', true);
+  }, btns);
+}
+// Anzeige über den Gegnern (Zustand, Hieb, Moral, Muster, Physik)
+const dbgLabels = [];
+function updateDebug(dt) {
+  dbgT -= dt;
+  if (dbgT <= 0) { dbgT = 0.25; if (debugPanel.visible) refreshDebug(); }
+  const show = settings.devMenu && dbgOverlay;
+  let n = 0;
+  if (show) for (const e of enemies) {
+    if (e.state === 'dead' || n >= 6) continue;
+    let L = dbgLabels[n];
+    if (!L) { L = makePanel(0.5, 0.17, 600); L.mesh.renderOrder = 7; L.key = ''; scene.add(L.mesh); dbgLabels.push(L); }
+    n++;
+    L.mesh.visible = true;
+    e.head.getWorldPosition(L.mesh.position); L.mesh.position.y += 0.42;
+    L.mesh.lookAt(headPos);
+    if (dbgT === 0.25) {
+      const D = describe(e), P = PERSONAS[e.persona];
+      const lines = [`${P.name} · ${e.name}`, `${D.st} · Moral ${Math.round(e.morale)} · ⚡${Math.round(e.stam)} · ❤${Math.max(0, Math.round(e.hp))}`, D.atk ? `Hieb: ${D.atk}` : (D.why || ' '), `Muster: ${D.pat.join(', ') || '–'}`, D.phys + (D.lever ? ' · ' + D.lever : '')];
+      const key = lines.join('|');
+      if (key !== L.key) { L.key = key; L.draw((ctx, cw, ch) => { panelBg(ctx, cw, ch, 14, P.color); lines.forEach((t, i) => text(ctx, t, cw / 2, 14 + i * 19, i ? 14 : 16, i ? '#e6edf5' : P.color, 'center', !i)); }); }
+    }
+  }
+  for (let i = n; i < dbgLabels.length; i++) dbgLabels[i].mesh.visible = false;
 }
 
 // =============================================================================
@@ -2321,6 +2515,7 @@ window.addEventListener('keydown', (e) => {
     if (e.key === 'e' || e.key === 'E') deskAttack(true);
     if (e.code === 'Space' && !deskGuard) { deskGuard = true; deskGuardT = elapsed; e.preventDefault(); }
     if ((e.key === 'q' || e.key === 'Q') && (state === 'playing' || state === 'menu')) toggleWeaponMenu();
+    if ((e.key === 't' || e.key === 'T') && settings.devMenu) { if (debugPanel.visible) closeDebugMenu(); else openDebugMenu(); }
   }
 });
 window.addEventListener('keyup', (e) => { keys.delete(e.code); if (e.code === 'Space') deskGuard = false; });
@@ -2411,6 +2606,7 @@ function refreshPause() {
     ...row(206, 62, [{ id: 'psettings', label: '⚙ Einstellungen', font: 28, onClick: () => { pausePanel.visible = false; menuView = 'settings'; menuPanel.visible = true; menuPanel.place(0.95, 0, -0.1); refreshMenu(); } }], 630, 60),
     ...row(284, 62, [
       { id: 'rack', label: '🗡 Waffen-Menü', font: 26, onClick: () => { setPaused(false); openWeaponMenu(); } },
+      ...(settings.devMenu ? [{ id: 'pdebug', label: '🛠 Test', font: 26, onClick: openDebugMenu }] : []),
       { id: 'quit', label: '🏠 Runde beenden', font: 26, onClick: () => { setPaused(false); endRound(false); } }
     ], 630, 40)
   ]);
@@ -2553,6 +2749,7 @@ function frameInner() {
   timed('waffen', () => { updateWeapons(dt); updateFlying(dt); });
   if (xr) updateSafety(dt);
   timed('gegner', () => updateGame(dt));
+  updateDebug(dt);
   updateDust(dt);
   updateAtmosphere(dt);
   getViewCamera().getWorldDirection(tmpV);
@@ -2574,5 +2771,7 @@ window.__game = {
   renderer, room, hands, enemies, arsenal, uiPanels, get playerHp() { return playerHp; }, set playerHp(v) { playerHp = v; }, get kills() { return kills; }, placeOnRack, equipDesk, giveWeapon, openWeaponMenu, closeWeaponMenu, get weaponPanel() { return weaponPanel; }, deskAttack, spawnTrainer, player, combatOpts, enemyWeaponSeg, segSegDist: (a, b, c, d) => segSeg(a, b, c, d), holsters, holster, equipLoadout, updateHolsterState, updateSafety, releaseHand, takeWeapon, take: (id, i) => { const w = newWeapon(id); takeWeapon(w, hands[i]); return w; }, get roundT() { return roundT; }, set roundT(v) { roundT = v; }, spawn: (type, at, passive) => spawnEnemy(headPos, { type, at, passive }), set trainType(v) { trainType = v; }, teleport: (x, z) => { camera.position.x = x; camera.position.z = z; }, settings, setup, menuPanel, setupPanel, pausePanel,
   get state() { return state; }, get paused() { return paused; }, get errors() { return errorCount; }, get floorOffset() { return floorOffset; },
   startPressed, enterMenu, enterSetup, finishSetup, setPaused, spawnEnemy: () => spawnEnemy(headPos), setTool, setupTriggerDown, setupTriggerUp,
-  alignToLine, loadSlot, saveSlot, serializeRoom, surfaceAt, updateSetup
+  alignToLine, loadSlot, saveSlot, serializeRoom, surfaceAt, updateSetup,
+  ragOpts, ragStats, aiOpts, debugApi, describe, yieldAction, openDebugMenu, closeDebugMenu, get debugPanel() { return debugPanel; }, setSetting,
+  spawnP: (type, at, persona, passive = false) => spawnEnemy(headPos, { type, at, persona, passive }), grabConstraint, corpseTest, pushCorpse, applyHit
 };

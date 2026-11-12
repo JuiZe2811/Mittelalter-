@@ -1,11 +1,14 @@
 import * as THREE from 'three';
-import { surfacesOf, roomOccluders } from './room.js?v=11';
-import { buildNav, findPath, walkable, nearestWalkable, groundAt, STEP } from './nav.js?v=11';
-import { SFX, SFX3D } from './sfx.js?v=11';
-import { puff, addDebris, burst, sparks, floorDecal, floatingText } from './effects.js?v=11';
-import { segSeg, segPoint, segDisc, slerpDir } from './geom.js?v=11';
-import { makeArrowMesh, ARROW_LEN } from './arrow.js?v=11';
-import { HIP, SH_X, SH_Y, L1, L2, THIGH, SHIN, REACH, ENEMY_TYPES, TYPE_ORDER, ATK, EW, PARRY, SHIELD_POSE, SHIELD_R, SHIELD_HP, STANCES, bloodMat, buildFighter, makeWeapon, makeShield, makeBlob, warmFaces } from './fighter.js?v=11';
+import { surfacesOf, roomOccluders } from './room.js?v=12';
+import { buildNav, findPath, walkable, nearestWalkable, groundAt, STEP } from './nav.js?v=12';
+import { SFX, SFX3D } from './sfx.js?v=12';
+import { puff, addDebris, burst, sparks, floorDecal, floatingText } from './effects.js?v=12';
+import { segSeg, segPoint, segDisc, slerpDir } from './geom.js?v=12';
+import { makeArrowMesh, ARROW_LEN } from './arrow.js?v=12';
+import { HIP, SH_X, SH_Y, L1, L2, THIGH, SHIN, REACH, ENEMY_TYPES, TYPE_ORDER, ATK, EW, PARRY, SHIELD_POSE, SHIELD_R, SHIELD_HP, STANCES, bloodMat, buildFighter, makeWeapon, makeShield, makeBlob, warmFaces } from './fighter.js?v=12';
+import { startRagdoll, pokeRagdoll, freeze as freezeRagdoll, updateRagdolls, capturePose, initRagdolls, updateRagArrows, ragOpts, ragStats } from './ragdoll.js?v=12';
+import { aiOpts, PERSONAS, PERSONA_ORDER, pickPersona, makeAttrs, newKnow, observe, tickKnow, share, patterns, MORALE } from './ai.js?v=12';
+export { ragOpts, ragStats, aiOpts, PERSONAS, PERSONA_ORDER, patterns };
 
 // =============================================================================
 // Gegner: menschliche Kämpfer mit echtem Kampfverhalten.
@@ -25,15 +28,20 @@ export const player = {
   shields: [], // { c, n, r, w }
   blades: [],  // { a, b, vel, speed, twoHand, w }
   aim: null,   // { o, d } solange der Spieler mit gespanntem Bogen / geladener Armbrust zielt
-  look: new THREE.Vector3(0, 0, -1), ranged: false, shieldStun: 0, stam: 100, // stam: Ausdauer des Spielers (erschöpft = Blocks werden durchgeschlagen) // Blickrichtung · hält Fernwaffe · Schild weggetreten bis (Zeit)
+  look: new THREE.Vector3(0, 0, -1), ranged: false, reach: 0.55, shieldStun: 0, stam: 100, // stam: Ausdauer des Spielers (erschöpft = Blocks werden durchgeschlagen) // Blickrichtung · hält Fernwaffe · Schild weggetreten bis (Zeit)
   hit() {}, blocked() {}, arrowStuck() {}, defeated() {},
   floorWeapons() { return []; }, // [{ id, pos, take() }] – Waffen am Boden, die ein entwaffneter Gegner aufheben kann
-  dropped() { return false; } // eine Waffe/ein Schild fällt: main.js macht daraus eine aufhebbare Waffe (true = übernommen)
+  dropped() { return false; }, // eine Waffe/ein Schild fällt: main.js macht daraus eine aufhebbare Waffe (true = übernommen)
+  grabbed() {},  // (e, w, u) ein Gegner packt die Waffe w des Spielers an der Stelle u (0 = Griff, 1 = Spitze)
+  disarmed() {}, // (e, w) der Gegner reißt dem Spieler die Waffe aus der Hand
+  say() {}       // (e, text) Stimme eines Gegners (z. B. beim Ergeben)
 };
+export const ai = { lastStart: -9 }; // gemeinsamer Zustand der Gruppe (kein gleichzeitiger Angriffsbeginn)
 // Einstellungen: Schaden, Reaktionsvermögen und Tempo der Gegner, Texte, gleichzeitige Angreifer
 export const opts = { dmg: 1, react: 1, speed: 1, texts: true, tokens: 2 };
-export function initEnemies(s) { scene = s; }
-export const aliveCount = () => enemies.filter(e => e.state !== 'dead').length;
+export function initEnemies(s) { scene = s; initRagdolls(s); }
+// Ergebene Gegner zählen nicht mehr als Angreifer
+export const aliveCount = () => enemies.filter(e => e.state !== 'dead' && e.state !== 'yield').length;
 export function prepareNav(head) { buildNav(head); }
 
 const LIMP = 22, CRIP = 50;   // Verletzung einer Zone: ab hier beeinträchtigt / unbrauchbar
@@ -43,11 +51,16 @@ const pick = (a) => a[Math.floor(Math.random() * a.length)];
 const V = () => new THREE.Vector3();
 const DOWN = new THREE.Vector3(0, -1, 0), ZAXIS = new THREE.Vector3(0, 0, 1);
 const t1 = V(), t2 = V(), t3 = V(), t4 = V(), t5 = V(), t6 = V(), t7 = V(), t8 = V();
-const q1 = new THREE.Quaternion(), q2 = new THREE.Quaternion(), m1 = new THREE.Matrix4();
+const q1 = new THREE.Quaternion(), q2 = new THREE.Quaternion(), m1 = new THREE.Matrix4(), m2 = new THREE.Matrix4();
 const BLOOD = 0x8a0a0a;
 const tokens = new Set(); // wer gerade angreifen darf (die anderen umkreisen den Spieler)
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const tac = { t: 0, backstabber: null };
+// KI-Regler (Test-Menü) und Moral fließen hier ein
+const RE = () => opts.react * aiOpts.react * aiOpts.diff;              // Reaktionsvermögen
+const DM = () => opts.dmg * aiOpts.diff;                               // Schaden der Gegner
+const DF = (v) => Math.min(0.97, v * aiOpts.defense);                 // Verteidigung (Parade, Schild, Ausweichen)
+const AG = (e) => e.A.aggro * aiOpts.aggro * (e.rage > 0 ? 1.35 : 1) * (0.55 + 0.45 * Math.min(1, e.morale / 60)); // Angriffslust (Angst bremst)
 
 // ---- Welche Gegner kommen wann -------------------------------------------------------------
 export function pickType(roundT) {
@@ -107,9 +120,12 @@ function clampReach(e, i, p, extra = 0) {
 // o: { type, speedMul, at (Vector3: direkt dort hinstellen), passive (Übungsgegner, wehrt sich nicht) }
 export function spawnEnemy(head, o = {}) {
   const type = o.type && ENEMY_TYPES[o.type] ? o.type : 'bandit', T = ENEMY_TYPES[type];
+  const persona = o.persona && PERSONAS[o.persona] ? o.persona : pickPersona(type), A = makeAttrs(T, persona);
   const e = Object.assign(buildFighter(type), {
-    type, T, name: T.name, pos: V(), y: 0, yaw: 0, t: 0, state: 'approach',
-    hp: T.hp, maxHp: T.hp, bal: T.balance, stam: 100, balT: 0, beaten: 0, rearm: null, rollT: 0,
+    type, T, A, persona, name: T.name, pos: V(), y: 0, yaw: 0, t: 0, state: 'approach',
+    morale: A.morale0 * aiOpts.morale, know: newKnow(), vel: V(), prevPos: V(), rag: null, getup: null, grab: null, grabCool: rand(2, 4), grabT: rand(0, 0.3),
+    defStreak: 0, followUp: null, rage: 0, moraleT: rand(0, 0.5), noRearm: false, dbg: { atk: '', why: '' },
+    hp: T.hp, maxHp: T.hp, bal: A.balance, stam: 100, balT: 0, beaten: 0, rearm: null, rollT: 0,
     inj: { head: 0, torso: 0, armR: 0, armL: 0, legR: 0, legL: 0 }, hurt: {}, crip: {}, bleed: 0, bleedT: 0,
     handed: 1, weaponId: null, wdef: null, weapon: null, shield: null, shieldKind: null, shieldR: 0, helmOff: false,
     wp: { hp: V(), bd: V() }, sp: { c: V(), n: V() }, hint: new THREE.Vector3(0, 0, 1), lastHp: V(),
@@ -117,7 +133,7 @@ export function spawnEnemy(head, o = {}) {
     threatOn: false, threatT: 0, shieldZone: 'mid', shieldHold: 0,
     path: null, pathT: 0, pathMode: 0, phase: rand(0, 6), gait: 0, moved: 0, strafe: Math.random() < 0.5 ? 1 : -1, strafeT: rand(1.5, 4), slot: Math.random(),
     token: false, tokenBan: 0, fighting: false, losT: 0, los: true,
-    speed: T.speed * rand(0.93, 1.07) * (o.speedMul || 1), moveMul: 1, atkSlow: 1, atkDmg: 1, kneel: false, drop: 0,
+    speed: T.speed * A.speed * rand(0.93, 1.07) * (o.speedMul || 1), moveMul: 1, atkSlow: 1, atkDmg: 1, kneel: false, drop: 0,
     down: null, downK: 0, fl: { hx: 0, hy: 0, lean: 0, tw: 0, dip: 0 }, taunt: null, tauntT: rand(3, 8), stance: 0, stanceT: rand(2, 5), kick: null, shieldShake: 0, shieldHp: 0,
     ang: 0, behind: false, slotDir: 0, zigT: 0, aimRoll: -1, lastHitT: -9, retreated: false, fallRoll: 0,
     lean: 0, twist: 0, leanCur: 0, twistCur: 0, passive: !!o.passive, lastAtk: null, groanT: rand(2, 6), stepPh: 0, zFrame: -1, zones: null
@@ -144,6 +160,7 @@ export function spawnEnemy(head, o = {}) {
     e.body.position.y = -2;
   }
   e.yaw = Math.atan2(head.x - e.pos.x, head.z - e.pos.z);
+  e.prevPos.copy(e.pos);
   place(e);
   scene.add(e.root);
   enemies.push(e);
@@ -156,14 +173,15 @@ function place(e) {
   e.root.updateMatrixWorld(true);
 }
 function removeEnemy(e) {
-  release(e);
+  release(e); endGrab(e);
+  if (e.rag) freezeRagdoll(e.rag);
   scene.remove(e.root);
   if (e.blob) scene.remove(e.blob);
   const i = enemies.indexOf(e);
   if (i >= 0) enemies.splice(i, 1);
 }
 export function clearEnemies() {
-  for (const e of enemies.splice(0)) { scene.remove(e.root); if (e.blob) scene.remove(e.blob); }
+  for (const e of enemies.splice(0)) { endGrab(e); if (e.rag) freezeRagdoll(e.rag); scene.remove(e.root); if (e.blob) scene.remove(e.blob); }
   tokens.clear();
   for (const s of shots.splice(0)) scene.remove(s.obj);
 }
@@ -301,25 +319,40 @@ export function applyHit(e, zone, info) {
   const impact = info.power * (info.type === 'blunt' ? 1.35 : info.type === 'thrust' ? 0.7 : 1) * (zone === 'legR' || zone === 'legL' ? 1.5 : zone === 'head' ? 1.3 : 1) * (e.act && e.act.locked ? 1.3 : 1) * (info.knock ? 0.8 + 0.2 * info.knock : 1);
   e.bal -= impact; e.balT = 1.2;
   const broken = e.bal <= 0;
-  if (broken) { e.bal = e.T.balance * 0.6; if (!info.knockdown && (impact > 30 || zone === 'legR' || zone === 'legL') && Math.random() < 0.65) info = { ...info, knockdown: true }; else N.push('Gleichgewicht verloren'); }
-  // zu Boden gehen: wuchtige stumpfe Treffer, Hammer, harter Schildstoß
-  if (!e.kneel && !e.down && e.hp > 0 && e.state === 'fight' && (info.knockdown || (info.type === 'blunt' && dmg >= 38 && Math.random() < 0.6))) {
-    e.down = { t: 0, T: rand(2.3, 3.1) }; release(e); N.unshift('Zu Boden!');
-    e.act = null; e.queue.length = 0; e.taunt = null; e.kick = null;
+  if (broken) { e.bal = e.A.balance * 0.6; if (!info.knockdown && (impact > 30 || zone === 'legR' || zone === 'legL') && Math.random() < 0.65) info = { ...info, knockdown: true }; else N.push('Gleichgewicht verloren'); }
+  // Liegt er (Ragdoll)? Der Treffer stößt den Körper an – ein eingefrorener wird wieder lebendig
+  if (e.down && e.down.rag && !e.getup) {
+    if (e.rag && e.rag.state === 'active') pokeRagdoll(e.rag, info.point, dir, info.power);
+    else startRagdoll(e, { point: info.point, dir, power: info.power });
+    e.down.T = Math.min(e.down.T + 0.4, e.down.t + 3);
   }
+  // zu Boden gehen: wuchtige stumpfe Treffer, Hammer, harter Schildstoß, gebrochenes Gleichgewicht
+  if (!e.kneel && !e.down && e.hp > 0 && e.state === 'fight' && (info.knockdown || (info.type === 'blunt' && dmg >= 38 && Math.random() < 0.6))) {
+    knockDown(e, dir, info.point, info.power); N.unshift('Zu Boden!');
+  }
+  // Moral: Schmerz und Verletzungen machen Angst (Berserker werden eher wütend)
+  moraleEvent(e, MORALE.hurt * 100 * res.dmg / e.maxHp); // relativ: ein zäher Ritter steckt denselben Hieb leichter weg
+  if (N.some(n => /unbrauchbar|Entwaffnet|Knie/.test(n))) moraleEvent(e, MORALE.crippled);
+  // kleine Treffer steckt ein Berserker weg: kein Zucken, kein Abbruch
+  const shrug = dmg < e.A.ignore && !broken && !e.down;
+  if (shrug) { e.fl.lean *= 0.3; e.fl.tw *= 0.3; if (dmg >= 3) N.unshift('ignoriert den Treffer'); }
   // Angriff unterbrechen, taumeln, Rückstoß
-  if (e.act) { const armored = e.wdef.heavy && e.act.locked; if (!armored && (dmg >= 8 || !e.act.locked)) { e.act = null; e.queue.length = 0; } }
-  if (dmg >= 5 || broken) {
+  if (e.act && !shrug) { const armored = e.wdef.heavy && e.act.locked; if (!armored && (dmg >= 8 || !e.act.locked)) { e.act = null; e.queue.length = 0; } }
+  if (!shrug && (dmg >= 5 || broken)) {
     e.stagger = Math.max(e.stagger, broken ? 1.1 : Math.min(0.8, zone === 'head' ? 0.4 + dmg / 70 : 0.12 + dmg / 90));
     e.staggerDir = t1.set(Math.sin(e.yaw), 0, Math.cos(e.yaw)).dot(dir) > 0.2 ? -1 : 1; // von hinten getroffen: nach vorne taumeln
     e.parry = null; e.react = null; e.bash = null; e.taunt = null; e.kick = null;
   }
   if (info.knock) { const k = 0.08 * info.knock; tryMove(e, dir.x * k, dir.z * k, true); }
-  if (e.hp <= 0) { kill(e, dir); res.killed = true; }
+  if (e.hp <= 0) { const mercy = e.state === 'yield'; kill(e, dir, info); res.killed = true; if (mercy) for (const o of enemies) if (o !== e && o.state === 'fight') moraleEvent(o, MORALE.mercyKill); }
   else {
     SFX3D.hurt(chestWorld(e, t2), 'runner');
-    // Moral: wer schwer angeschlagen oder wehrlos ist, flieht vielleicht
-    if (!e.passive && e.state === 'fight' && !e.kneel && (e.hp < e.maxHp * 0.3 || (e.crip.armR && e.crip.armL)) && Math.random() < (e.crip.armR && e.crip.armL ? 1 : e.T.flee)) startFlee(e);
+    // Panik: Ängstliche lassen die Waffe fallen, wenn die Moral bricht
+    if (e.state === 'fight' && !e.passive && e.weapon && e.weaponId !== 'fist' && e.morale < 30 && Math.random() < e.A.panicDrop) {
+      dropItem(e, e.weapon, dir, e.weaponId); setWeapon(e, 'fist'); e.act = null; e.queue.length = 0; e.noRearm = true; N.unshift('lässt vor Angst die Waffe fallen!');
+      moraleEvent(e, -10);
+    }
+    if (!e.passive && e.state === 'fight' && !e.down) moraleCheck(e, true);
   }
   if (res.counter && !res.killed && dmg >= 8) N.unshift('Konter!');
   if (N.length && !res.killed) note(e, N[0]);
@@ -344,41 +377,54 @@ function armLost(e, i, dir) {
 }
 // Der Spieler trifft die Waffe des Gegners. power = Wucht des Schlags (wie bei applyHit).
 // Liefert 'disarmed' | 'beaten' (Deckung weggeschlagen, kurz offen) | 'clash' (beide Waffen prallen ab) | 'deflected'.
-export function beatWeapon(e, power, dir) {
+// Entwaffnen nach Hebel: je weiter vorne die Waffe getroffen wird, desto größer das Drehmoment am Handgelenk;
+// dagegen stehen Griffkraft, Ausdauer, Verletzung und zweihändiger Griff. Nur eine kleine Streuung (±12 %).
+function gripHold(e) { return (e.wdef.twoH ? 30 : 20) * e.A.grip * (0.5 + e.stam / 200) * (e.hurt[zoneOfArm(wArm(e))] ? 0.6 : 1) * (e.parry ? 1.4 : 1); }
+function leverAt(e, point) {
+  if (!point) return 0.6;
+  weaponSeg(e, e.wdef.haft, _ha, _hb);
+  const L = _ha.distanceTo(_hb) || 1;
+  return clamp(t7.subVectors(point, _ha).dot(t6.subVectors(_hb, _ha)) / (L * L), 0, 1); // 0 = an der Hand, 1 = Spitze
+}
+export function beatWeapon(e, power, dir, point = null) {
   if (e.state === 'dead' || !e.weapon) return 'deflected';
   e.stam = Math.max(0, e.stam - power * 0.6);
   if (e.act && e.act.locked) { startRecoil(e, e.act, 0.6); e.bal -= power * 0.4; return 'clash'; } // Waffen prallen im Schlag aufeinander
-  const hold = (e.wdef.twoH ? 30 : 20) * (0.5 + e.stam / 200) * (e.hurt[zoneOfArm(wArm(e))] ? 0.6 : 1) * (e.parry ? 1.4 : 1);
+  const hold = gripHold(e), lev = leverAt(e, point);
   if (power < hold * 0.7) return 'deflected';
   // weggeschlagen: Waffe fliegt zur Seite, Deckung ist offen
   e.beaten = 0.75; e.parry = null; e.act = null; e.queue.length = 0; e.react = null;
   const L = t3.copy(dir).applyQuaternion(q1.copy(e.root.quaternion).invert());
   e.wp.hp.x += clamp(L.x, -1, 1) * 0.3; e.wp.hp.y -= 0.12; e.wp.hp.z -= 0.1;
   e.bal -= power * 0.3; e.balT = 1.2;
-  // Entwaffnen: sehr harter Schlag gegen eine schwache oder erschöpfte Hand
-  if (power > hold * 1.6 && Math.random() < 0.35 + (e.stam < 25 ? 0.3 : 0) + (e.hurt[zoneOfArm(wArm(e))] ? 0.25 : 0)) { disarm(e, dir); return 'disarmed'; }
+  // Entwaffnen: Drehmoment (Wucht × Hebel) gegen die Griffkraft
+  const torque = power * (0.35 + 0.95 * lev);
+  e.dbg.lever = `Hebel ${(lev * 100) | 0}% · Moment ${torque | 0} / Griff ${(hold * 1.5) | 0}`;
+  if (torque > hold * 1.5 * rand(0.88, 1.12)) { disarm(e, dir); return 'disarmed'; }
   return 'beaten';
 }
 function disarm(e, dir) {
   dropItem(e, e.weapon, dir, e.weaponId); e.weapon = null;
   setWeapon(e, 'fist');
-  e.rearm = { t: 0 };
+  e.rearm = e.noRearm ? null : { t: 0 };
   release(e);
   note(e, 'Entwaffnet!');
+  moraleEvent(e, MORALE.disarmed);
 }
 // Erfolgreiche Parade mit gutem Timing: Gegner weit offen, verliert Gleichgewicht, eventuell die Waffe
 export function parried(e, perfect) {
   if (!e.recoil) return;
   e.recoil.T = perfect ? 1.35 : e.recoil.T;
   e.bal -= perfect ? 28 : 12; e.balT = 1.2; e.stam = Math.max(0, e.stam - (perfect ? 25 : 10));
-  if (perfect && e.weapon && (e.stam < 20 || e.hurt[zoneOfArm(wArm(e))]) && Math.random() < 0.4) disarm(e, t1.set(Math.sin(e.yaw), 0, Math.cos(e.yaw)).negate());
+  // perfekte Parade gegen ein schwaches Handgelenk: die Waffe wird ihm aus der Hand gedreht (Griffkraft statt Würfel)
+  if (perfect && e.weapon && gripHold(e) < 14) disarm(e, t1.set(Math.sin(e.yaw), 0, Math.cos(e.yaw)).negate());
 }
 // Hand drückt gegen den Gegner (freie Hand, Schild): schiebt ihn weg, kostet ihn Gleichgewicht
 export function pushEnemy(e, dir, amount) {
   if (e.state !== 'fight' || e.down) return;
   tryMove(e, dir.x * amount, dir.z * amount, true);
   e.bal -= amount * 60; e.balT = 1.2;
-  if (e.bal <= 0) { e.bal = e.T.balance * 0.6; e.stagger = Math.max(e.stagger, 0.9); e.act = null; note(e, 'weggestoßen'); }
+  if (e.bal <= 0) { e.bal = e.A.balance * 0.6; e.stagger = Math.max(e.stagger, 0.9); e.act = null; note(e, 'weggestoßen'); }
 }
 // Bindung: die Klinge des Spielers liegt an der Waffe des Gegners (langsam, kein Hieb).
 // Liefert den Gegner, an dessen Waffe a→b liegt, oder null.
@@ -403,7 +449,12 @@ export function bindPush(e, push, dt) {
   e.bind = e.bindOff.length();
   e.stam = Math.max(0, e.stam - push.length() * 40);
   e.act = null; e.queue.length = 0; e.cool = Math.max(e.cool, 0.25); // in der Bindung greift er nicht an
-  if (e.bind > 0.2) { e.bind = 0; e.bindOff.set(0, 0, 0); e.beaten = 0.7; e.bal -= 12; note(e, 'Deckung aufgedrückt!', '#7dffa8'); return 'beaten'; }
+  if (e.bind > 0.2) {
+    e.bind = 0; e.bindOff.set(0, 0, 0);
+    // Winden: wer die Bindung gewinnt und am schwachen Handgelenk Hebel hat, dreht die Waffe heraus
+    if (resist * e.A.grip < 0.62 && e.weaponId !== 'fist') { disarm(e, t1.copy(push).normalize()); return 'disarmed'; }
+    e.beaten = 0.7; e.bal -= 12; note(e, 'Deckung aufgedrückt!', '#7dffa8'); return 'beaten';
+  }
   return null;
 }
 // Treffer auf den Schild eines Gegners: Äxte und Hämmer zerschlagen ihn. Liefert true, wenn er zerbricht.
@@ -424,19 +475,165 @@ export function shoveEnemy(e, dir, power, point) {
   if (!r.killed) { e.stagger = Math.max(e.stagger, 0.85); e.shieldZone = 'mid'; }
   return r;
 }
-function kill(e, dir) {
+function kill(e, dir, info = null) {
   if (e.state === 'dead') return;
-  release(e);
+  const wasYield = e.state === 'yield';
+  release(e); endGrab(e);
   const fwd = t1.set(Math.sin(e.yaw), 0, Math.cos(e.yaw));
-  e.state = 'dead'; e.t = 0; e.act = null; e.parry = null; e.shot = null;
+  e.state = 'dead'; e.t = 0; e.act = null; e.parry = null; e.shot = null; e.getup = null;
   e.fall = dir && fwd.dot(dir) > 0.2 ? 1 : -1; // von hinten getroffen: fällt nach vorne
   e.fallRoll = rand(-0.7, 0.7);
   if (e.downK > 0.6) { e.fall = -1; e.t = 0.95; e.fallRoll = 0; } // lag schon am Boden: bleibt liegen
+  // Ragdoll: liegt er schon (Ragdoll aktiv oder eingefroren), bleibt er so liegen; sonst fällt er physikalisch
+  const lying = !!(e.down && e.down.rag);
+  e.ragDead = lying || !!startRagdoll(e, { point: info && info.point, dir: dir || t2.copy(fwd).multiplyScalar(0.4), power: info ? info.power : 8, carry: e.vel });
   e.downK = 0; e.down = null;
   dropItem(e, e.weapon, dir, e.weaponId); e.weapon = null;
   dropItem(e, e.shield, dir, 'shield'); e.shield = null;
   SFX3D.death(chestWorld(e, t2), 'runner');
-  player.defeated(e, 'dead');
+  if (!wasYield) player.defeated(e, 'dead');
+  // die anderen sehen ihn fallen
+  for (const o of enemies) {
+    if (o === e || o.state !== 'fight' || o.passive) continue;
+    const d = o.pos.distanceTo(e.pos);
+    if (d > 7) continue;
+    if (o.persona === 'berserker') { o.rage = 6; note(o, 'rasend vor Wut!', '#ff7a5a'); }
+    else moraleEvent(o, MORALE.allyDead * (d < 3 ? 1.3 : 1));
+  }
+}
+// Zu Boden: mit Ragdoll (Budget frei) – sonst die prozedurale Sturz-Animation. Die Waffe bleibt in der Hand
+// oder fliegt weg, je nach Wucht gegen Griffkraft (kein Würfeln, keine Rückkehr in die Hand).
+function knockDown(e, dir, point, power) {
+  release(e); endGrab(e);
+  e.act = null; e.queue.length = 0; e.taunt = null; e.kick = null; e.parry = null; e.react = null; e.dodge = null; e.bash = null; e.recoil = null; e.rearm = null;
+  const R = startRagdoll(e, { point, dir, power: power * 1.1, carry: e.vel });
+  e.down = { t: 0, T: R ? rand(2.8, 3.8) : rand(2.3, 3.1), rag: !!R };
+  if (e.weapon && e.weaponId !== 'fist' && e.weaponId !== 'bow' && power * (e.persona === 'fearful' ? 1.4 : 1) > 26 * e.A.grip * (0.5 + e.stam / 200)) {
+    dropItem(e, e.weapon, dir, e.weaponId); e.weapon = null; setWeapon(e, 'fist'); e.lostInFall = true;
+  }
+  moraleEvent(e, MORALE.down);
+  // Kameraden decken den Gestürzten: der nächste greift sofort an
+  let best = null, bd = 4;
+  for (const o of enemies) { if (o === e || o.state !== 'fight' || o.passive || o.down || o.weaponId === 'bow') continue; const d = o.pos.distanceTo(e.pos); if (d < bd) { bd = d; best = o; } }
+  if (best && best.persona !== 'fearful') { if (!best.token) { tokens.add(best); best.token = true; } best.cool = Math.min(best.cool, 0.25); best.dbg.why = 'deckt Kamerad'; note(best, 'deckt seinen Kameraden', '#9ad'); }
+}
+// Aufstehen nach einem Ragdoll-Sturz: Becken-Lage übernehmen, Figur zum Spieler drehen, aus der liegenden
+// Haltung über eine Hock-Haltung in die Kampfhaltung überblenden (Physik → Animation ohne Sprung)
+function beginGetUp(e) {
+  if (e.rag && e.rag.state === 'active') freezeRagdoll(e.rag);
+  e.root.updateMatrixWorld(true);
+  e.hips.getWorldPosition(t1);
+  m2.copy(e.hips.matrixWorld);
+  t1.y = 0;
+  const p = walkable(t1.x, t1.z) ? t1 : nearestWalkable(t1);
+  e.pos.set(p.x, 0, p.z); e.y = groundAt(e.pos.x, e.pos.z);
+  e.yaw = Math.atan2(player.head.x - e.pos.x, player.head.z - e.pos.z);
+  place(e);
+  e.body.rotation.set(0, 0, 0); e.body.position.set(0, 0, 0);
+  e.root.updateMatrixWorld(true);
+  m1.copy(e.body.matrixWorld).invert().multiply(m2).decompose(e.hips.position, e.hips.quaternion, t2);
+  e.hips.scale.set(1, 1, 1);
+  e.getup = { t: 0, from: capturePose(e) };
+  e.rag = null;
+  e.prevPos.copy(e.pos);
+}
+const GETUP_T = 1.45;
+const _gq = new THREE.Quaternion(), _gp = V();
+function applyGetUp(e, dt) {
+  const G = e.getup;
+  G.t += dt;
+  // Hocke: ein Knie am Boden, Oberkörper vorgebeugt – blendet bis GETUP_T in den Stand aus
+  const c = 1 - THREE.MathUtils.smoothstep(G.t, 0.45, GETUP_T);
+  e.hips.quaternion.identity(); e.hips.position.x = 0; e.hips.position.z = 0;
+  for (const L of e.legs) { L.top.rotation.y = 0; L.top.rotation.z = 0; L.mid.rotation.y = 0; L.mid.rotation.z = 0; }
+  if (c > 0) {
+    e.hips.position.y = lerp(e.hips.position.y, 0.5, c);
+    e.legs[0].top.rotation.x = lerp(e.legs[0].top.rotation.x, -1.45, c); e.legs[0].mid.rotation.x = lerp(e.legs[0].mid.rotation.x, 1.6, c);
+    e.legs[1].top.rotation.x = lerp(e.legs[1].top.rotation.x, 0.15, c); e.legs[1].mid.rotation.x = lerp(e.legs[1].mid.rotation.x, 1.75, c);
+    e.torso.rotation.x += 0.45 * c;
+  }
+  // Übergang aus der liegenden (Physik-)Haltung
+  const b = THREE.MathUtils.smoothstep(G.t, 0, 0.7);
+  if (b < 1) for (const F of G.from) {
+    _gq.copy(F.bone.quaternion); _gp.copy(F.bone.position);
+    F.bone.quaternion.slerpQuaternions(F.q, _gq, b);
+    F.bone.position.lerpVectors(F.p, _gp, b);
+  }
+  if (G.t >= GETUP_T) {
+    e.getup = null;
+    // nach dem Aufstehen: Waffe verloren → suchen/aufheben bzw. Ersatzwaffe ziehen; Moral entscheidet über Kampf oder Flucht
+    if (e.lostInFall && !e.noRearm) { e.rearm = { t: 0 }; e.lostInFall = false; }
+    moraleCheck(e, false);
+  }
+}
+
+// ---- Moral: Angst, Wut, Zahlenverhältnis → kämpfen, fliehen oder sich ergeben --------------------
+function moraleEvent(e, amount) {
+  if (e.passive || e.state === 'dead') return;
+  if (amount < 0) amount *= e.persona === 'fearful' ? 1.4 : e.persona === 'berserker' ? 0.25 : e.persona === 'elite' ? 0.6 : 1;
+  e.morale = clamp(e.morale + amount, 0, 100);
+}
+// regelmäßig (gestaffelt): Moral erholt sich zum Grundwert, mehr Verbündete geben Mut
+function moraleTick(e, dt) {
+  e.moraleT -= dt;
+  if (e.rage > 0) e.rage -= dt;
+  if (e.moraleT > 0) return;
+  e.moraleT = 0.5;
+  let allies = 0;
+  for (const o of enemies) if (o !== e && o.state === 'fight' && o.pos.distanceTo(e.pos) < 6) allies++;
+  const base = e.A.morale0 * aiOpts.morale + Math.min(18, allies * 6) - (e.hp < e.maxHp * 0.35 ? 15 : 0) - (e.bleed > 0.6 ? 8 : 0);
+  e.morale = clamp(e.morale + (Math.min(100, base) - e.morale) * 0.04, 0, 100);
+  if (e.state === 'fight' && !e.down && !e.getup) moraleCheck(e, false);
+}
+// Entscheidung bei niedriger Moral: Berserker ergeben sich nie, Ängstliche schnell
+function moraleCheck(e, hit) {
+  if (e.passive || e.state !== 'fight' || e.down || e.getup) return;
+  const helpless = (e.crip.armR && e.crip.armL) || (e.weaponId === 'fist' && e.noRearm);
+  const low = e.morale < (hit ? 22 : 15) || (helpless && e.morale < 45);
+  if (!low) return;
+  if (e.persona === 'berserker' && !helpless) return;
+  const opens = surfacesOf('door', 'window').length > 0;
+  const giveUp = e.A.surrender * (helpless ? 1.6 : 1) * (e.kneel ? 1.5 : 1) * (e.hp < e.maxHp * 0.3 ? 1.3 : 1);
+  if (Math.random() < giveUp || (!opens && Math.random() < 0.5 + giveUp)) surrender(e);
+  else if (opens && Math.random() < 0.35 + e.A.flee) startFlee(e);
+  else e.moraleT = 1.5; // hält noch durch
+}
+// Ergeben: Waffe und Schild fallen lassen, Hände hoch, auf die Knie, um Gnade bitten
+const MERCY = ['Gnade! Ich ergebe mich!', 'Nicht töten! Ich gebe auf!', 'Halt! Ich ergebe mich!', 'Bitte, Gnade!'];
+export function surrender(e) {
+  if (e.state === 'dead' || e.state === 'yield') return;
+  release(e); endGrab(e);
+  if (e.weapon && e.weaponId !== 'fist') { dropItem(e, e.weapon, null, e.weaponId); e.weapon = null; }
+  if (e.shield) { dropItem(e, e.shield, null, 'shield'); e.shield = null; }
+  setWeapon(e, 'fist');
+  e.state = 'yield'; e.t = 0; e.act = null; e.queue.length = 0; e.parry = null; e.react = null; e.dodge = null; e.bash = null; e.kick = null; e.taunt = null; e.rearm = null; e.recoil = null; e.shot = null;
+  e.fighting = false;
+  const line = pick(MERCY);
+  note(e, '🏳 ' + line, '#fff');
+  player.say(e, line);
+  player.defeated(e, 'yield');
+  for (const o of enemies) if (o !== e && o.state === 'fight' && o.pos.distanceTo(e.pos) < 7) moraleEvent(o, MORALE.allyYield);
+}
+// Sandbox-Aktionen für Ergebene (Test-Menü)
+export function yieldAction(e, what) {
+  if (!e || e.state !== 'yield') return false;
+  if (what === 'away') { // wegschicken: geht durch die nächste Tür/das nächste Fenster
+    e.kneel = false; recompute(e);
+    if (surfacesOf('door', 'window').length) { e.state = 'fight'; startFlee(e); e.sentAway = true; }
+    else removeEnemy(e);
+  } else if (what === 'fight') { // wieder kämpfen lassen
+    e.kneel = false; recompute(e);
+    e.state = 'fight'; e.morale = Math.max(40, e.A.morale0 * 0.7); e.cool = rand(0.8, 1.5);
+    if (!e.noRearm) e.rearm = { t: 0 };
+  } else if (what === 'disarmed') e.noRearm = !e.noRearm;
+  else if (what === 'remove') removeEnemy(e);
+  return true;
+}
+function yieldUpdate(e, dt) {
+  e.fighting = false;
+  turnTo(e, player.head.x, player.head.z, dt, 1.5);
+  if (e.t > 0.9 && !e.kneel) { e.kneel = true; SFX.thud(0.2); }
+  guardPose(e, dt, 1);
 }
 function startFlee(e) {
   const opens = surfacesOf('door', 'window');
@@ -451,6 +648,86 @@ function startFlee(e) {
   e.opening = best;
   SFX3D.scream(chestWorld(e, t2));
   note(e, 'flieht!', '#9ad');
+}
+
+// ---- Waffe des Spielers packen ---------------------------------------------------------------------
+// Ein Gegner mit freier Hand greift nach einer langsamen/ruhenden Klinge in Reichweite (nach einem Stich,
+// in der Bindung, beim Abwarten). Griff/Parierstange: sicherer Halt. Klinge: mit Handschuh möglich,
+// mit bloßer Hand schneidet sie ihn, wenn der Spieler sie herauszieht. Entwaffnete versuchen es öfter.
+// Kräftemessen über Hebel (Griffstelle, Griffkraft, Ausdauer, ein-/beidhändig, wie stark der Spieler zieht).
+export function endGrab(e) { if (e.grab) { e.grab = null; e.grabCool = rand(3, 6); } }
+const gloved = (e) => e.T.armor.arms !== 'none' && e.T.armor.arms !== 'cloth';
+function tryGrab(e, dt, d) {
+  e.grabT -= dt; e.grabCool -= dt;
+  if (e.grabT > 0) return;
+  e.grabT = 0.3;
+  if (e.grabCool > 0 || d > 1.45 || e.kneel || e.act || e.parry || !player.blades.length) return;
+  const oa = 1 - wArm(e), fist = e.weaponId === 'fist';
+  const hand = fist ? (armOk(e, oa) ? oa : wArm(e)) : (!e.shield && !e.wdef.twoH && e.weaponId !== 'bow' && armOk(e, oa) ? oa : -1);
+  if (hand < 0 || !armOk(e, hand)) return;
+  const want = (fist ? 0.55 : 0.22) * e.A.smart * RE() * (e.forceGrab ? 10 : 1);
+  const S = e.body.localToWorld(shoulder(e, hand, t1));
+  for (const b of player.blades) {
+    if (!b.w || !b.w.holder || b.speed > 1.0) continue;
+    const dist = segPoint(b.a, b.b, S, _hit);
+    if (dist > REACH * e.scale + 0.04) continue;
+    if (Math.random() > want) continue;
+    const L = b.a.distanceTo(b.b) || 1, u = clamp(t2.subVectors(_hit, b.a).dot(t3.subVectors(b.b, b.a)) / (L * L), 0, 1);
+    e.grab = { t: 0, phase: 'reach', w: b.w, u, hand, local: e.body.worldToLocal(_hit.clone()), pt: _hit.clone(), yank: 0, armored: gloved(e), tension: 0, twist: 0, pull: 0, from: V() };
+    e.body.worldToLocal(e.arms[hand].mid.localToWorld(e.grab.from.set(0, -L2, 0)));
+    e.forceGrab = false;
+    e.dbg.why = 'greift nach deiner Waffe';
+    return;
+  }
+}
+// main.js meldet jedes Bild: Abstand echte Hand ↔ gehaltener Punkt, Drehgeschwindigkeit um die Klinge (rad/s),
+// Zuggeschwindigkeit weg vom Gegner (m/s), Gleiten entlang der Klinge (m/s)
+export function grabFeedback(e, tension, twist, pull, slide) { if (e.grab) { const g = e.grab; g.tension = tension; g.twist = twist; g.pull = pull; g.slide = slide; } }
+function updateGrab(e, dt) {
+  const g = e.grab;
+  g.t += dt;
+  if (!g.w.holder || e.down || e.state !== 'fight' || !armOk(e, g.hand)) { endGrab(e); return; }
+  if (g.phase === 'reach') {
+    // die Hand folgt der Klinge, solange sie in Reichweite und langsam ist – zieht der Spieler sie schnell weg, greift er ins Leere
+    const P = t1.copy(g.w.gA).lerp(g.w.gB, g.u);
+    const S = e.body.localToWorld(shoulder(e, g.hand, t2));
+    if (P.distanceTo(S) > REACH * e.scale + 0.08 || g.w.tipSpeed > 1.6) { endGrab(e); note(e, 'greift ins Leere'); return; }
+    e.body.worldToLocal(g.local.copy(P));
+    if (g.t < 0.28) return;
+    g.phase = 'hold'; g.t = 0;
+    e.body.worldToLocal(g.local.copy(P));
+    player.grabbed(e, g.w, g.u);
+    SFX.click(900, 0.3, 0.05);
+    note(e, g.u < 0.22 ? 'packt deinen Griff!' : g.armored ? 'packt deine Klinge (Handschuh)!' : 'packt deine Klinge!', '#ffb04a');
+    return;
+  }
+  // Halten: er zieht die Waffe langsam zu sich; Kräftemessen über den Hebel
+  t3.set(e.arms[g.hand].sx * 0.12, 1.12 - e.drop, 0.32);
+  g.local.lerp(t3, Math.min(1, dt * 0.8));
+  e.body.localToWorld(g.pt.copy(g.local));
+  // Hebel: wer die Klinge weit vorne fasst, hebelt gegen das Handgelenk des Spielers (Drehmoment wächst mit u);
+  // am Griff kontrolliert er das Handgelenk direkt. Bloße Hand an der Schneide hält nur zaghaft fest.
+  const lev = e.A.grip * (g.u < 0.22 ? 1.1 : 0.6 + 0.8 * g.u) * (g.u < 0.22 || g.armored ? 1 : 0.6) * (0.5 + e.stam / 200) * (e.weaponId === 'fist' ? 1.35 : 1);
+  const res = (g.w.twoHand ? 1.8 : 1) * (0.5 + player.stam / 200) + clamp(g.pull, 0, 1.2) * 1.5; // langsames Gegenziehen hilft
+  g.yank += (lev - res * 0.8) * dt;
+  g.lev = lev; g.res = res;
+  e.dbg.lever = `Hebel ${lev.toFixed(2)} gegen ${res.toFixed(2)}`;
+  e.stam = Math.max(0, e.stam - dt * 6);
+  const jerk = g.pull > (g.u < 0.22 ? 2 : 1.2); // ruckartig zurückgerissen
+  if (g.twist > 6 || jerk || g.tension > 0.7) { // Spieler dreht/reißt die Waffe frei (bzw. Tracking-Sprung)
+    const cut = g.u >= 0.22 && !g.armored && (g.slide > 0.6 || jerk);
+    const hz = zoneOfArm(g.hand);
+    endGrab(e);
+    e.beaten = 0.35;
+    if (cut) { applyHit(e, hz, { type: 'slash', power: 10 + 16 * Math.min(2, Math.max(g.slide, g.pull)), dir: t4.set(Math.sin(e.yaw), 0, Math.cos(e.yaw)).negate(), point: g.pt.clone() }); note(e, 'Hand an der Klinge zerschnitten!', '#7dffa8'); }
+    else note(e, g.twist > 6 ? 'Klinge herausgedreht' : 'Waffe losgerissen', '#7dffa8');
+  } else if (g.yank > 1) { // er reißt dem Spieler die Waffe aus der Hand
+    const w = g.w; endGrab(e);
+    const id = player.disarmed(e, w);
+    note(e, 'reißt dir die Waffe aus der Hand!', '#ff8a7a');
+    if (id && e.weaponId === 'fist' && EW[id]) { setWeapon(e, id); e.rearm = null; }
+  } else if (g.yank < -0.8 || g.t > 2.8) { endGrab(e); note(e, 'verliert den Griff'); }
+  else if (e.weaponId !== 'fist' && e.token) e.cool = Math.min(e.cool, 0.2); // Klinge kontrolliert: jetzt zustechen
 }
 
 // ---- Bewegung ---------------------------------------------------------------------------------
@@ -496,7 +773,13 @@ function pathWalk(e, dt, goal, speedMul = 1) {
 }
 // Beinarbeit im Kampf: Abstand halten (Angreifer auf Schlagdistanz, Wartende im Kreis), seitlich umkreisen
 function footwork(e, dt, d, dx, dz, rush = false) {
-  const want = (e.token || rush ? e.wdef.range : 2.25 + e.slot * 0.8) + (e.hp < e.maxHp * 0.5 && !rush ? 0.12 : 0);
+  // Abstand: eigene Reichweite gegen die des Spielers – kürzere Waffe drängt hinein, längere hält ihn auf Abstand
+  let want = (e.token || rush ? e.wdef.range : 2.25 + e.slot * 0.8) + (e.hp < e.maxHp * 0.5 && !rush ? 0.12 : 0);
+  if (e.token && !rush) {
+    if (e.cool > 0.25) want += e.A.dist * (e.morale < 40 ? 1.5 : 1); // Abstand halten – bereit zum Angriff tritt er hinein
+    if (e.A.smart > 0.5 && player.reach > e.wdef.range + 0.25) want = Math.min(want, e.wdef.range * 0.85); // unterlaufen
+    if (e.cool > 0.4 && (e.persona === 'elite' || e.persona === 'cautious')) want = Math.max(want, player.reach + 0.15); // Mensur: knapp außerhalb seiner Reichweite warten
+  }
   const sp = e.speed * e.moveMul * (e.daze > 0 ? 0.6 : 1) * (rush ? 1.25 : 1);
   let f = 0;
   if (d > want + 0.12) f = 1; else if (d < want - 0.2) f = -0.75;
@@ -525,6 +808,14 @@ function tactics(dt) {
   if (tac.t > 0) return;
   tac.t = 0.25;
   const P = player.head;
+  // Reichweite des Spielers (längste Klinge + Arm) und Seite seines Schildes – sichtbare Informationen
+  let reach = 0.55, sx = 0, sz = 0, hasShield = false;
+  for (const b of player.blades) reach = Math.max(reach, 0.55 + b.a.distanceTo(b.b));
+  player.reach = reach;
+  for (const sh of player.shields) if (sh.w && sh.w.holder) { hasShield = true; sx += sh.c.x - P.x; sz += sh.c.z - P.z; }
+  const lx = player.look.x, lz = player.look.z, ll = Math.hypot(lx, lz) || 1;
+  const side = hasShield ? Math.sign(sx * -lz / ll + sz * lx / ll) || 1 : 0; // +1 = Schild rechts vom Spieler
+  const openAng = hasShield ? Math.atan2(lx / ll * Math.cos(0.7) + (side * lz / ll) * Math.sin(0.7), lz / ll * Math.cos(0.7) - (side * lx / ll) * Math.sin(0.7)) : 0;
   const group = enemies.filter(e => e.state === 'fight' && !e.passive && !e.down && e.weaponId !== 'bow' && Math.abs(player.floor - e.y) < 0.45 && Math.hypot(e.pos.x - P.x, e.pos.z - P.z) < 5);
   const back = Math.atan2(-player.look.x, -player.look.z);
   let front = null, fd = Infinity;
@@ -541,7 +832,9 @@ function tactics(dt) {
     let push = 0;
     for (const o of group) { if (o === e) continue; const dA = wrap(e.ang - o.ang); if (Math.abs(dA) < minSep) push += (dA >= 0 ? 1 : -1) * (minSep - Math.abs(dA)); }
     // einer bindet den Spieler von vorne, die Klugen gehen ihm in die Flanke und in den Rücken
-    if (n > 1 && e !== front && !e.behind && !e.kneel) push += Math.sign(wrap(back - e.ang) || 1) * 0.7 * e.T.smart;
+    if (n > 1 && e !== front && !e.behind && !e.kneel) push += Math.sign(wrap(back - e.ang) || 1) * 0.7 * e.A.smart;
+    // um den Schild herum: zur ungedeckten Seite des Spielers wandern
+    if (hasShield && e.A.smart > 0.45) { const dA = wrap(openAng - e.ang); if (Math.abs(dA) > 0.15) push += Math.sign(dA) * 0.45 * e.A.smart; }
     e.slotDir = push;
     if (e.behind && armOk(e, wArm(e))) { const dd = Math.hypot(e.pos.x - P.x, e.pos.z - P.z); if (dd < 3.6 && dd < bd) { bd = dd; tac.backstabber = e; } }
   }
@@ -553,7 +846,7 @@ export function teamOpening(except) {
   for (const o of enemies) {
     if (o === except || o.state !== 'fight' || o.passive || o.act || o.down || o.stagger > 0 || o.weaponId === 'bow' || !armOk(o, wArm(o))) continue;
     const d = Math.hypot(player.head.x - o.pos.x, player.head.z - o.pos.z);
-    if (d > o.wdef.range + 0.6 || Math.abs(player.floor - o.y) > 0.45 || Math.random() > o.T.smart * opts.react) continue;
+    if (d > o.wdef.range + 0.6 || Math.abs(player.floor - o.y) > 0.45 || Math.random() > o.A.smart * RE()) continue;
     if (!o.token && tokens.size < opts.tokens + 1) { tokens.add(o); o.token = true; }
     if (o.token) o.cool = Math.min(o.cool, rand(0.05, 0.3));
   }
@@ -580,7 +873,7 @@ export function notifyShot(o, d) {
     if (e.state !== 'fight' || e.passive || e.down || e.act || e.kneel || e.stagger > 0 || (e.shield && e.aimRoll === 1)) continue;
     const c = chestWorld(e, t4), along = t5.subVectors(c, o).dot(d);
     if (along < 2.5 || t5.copy(o).addScaledVector(d, along).distanceTo(c) > 0.6) continue;
-    if (Math.random() > e.T.arrowDodge * opts.react) continue;
+    if (Math.random() > e.A.arrowDodge * RE()) continue;
     const side = Math.random() < 0.5 ? 1 : -1;
     e.dodge = { t: 0.24, dx: -d.z * side, dz: d.x * side, v: 3.2 };
   }
@@ -592,28 +885,38 @@ function chooseAttack(e) {
   let names = Object.keys(w.moves);
   if (e.kneel) names = names.filter(n => n !== 'oberhau' && n !== 'stichHoch');
   if (!names.length) names = Object.keys(w.moves);
+  const K = e.know, ak = Math.min(1.5, e.A.adapt * aiOpts.adapt), dodgy = share(K, 'def', 'dodge');
   const weighted = () => {
-    // Gewicht je Hieb: gedeckte Bahnen meiden (je klüger, desto konsequenter), Wiederholungen meiden
-    const smart = Math.min(1, e.T.smart * opts.react);
-    const wt = names.map(n => w.moves[n] * (n === e.lastAtk ? 0.4 : 1) * (covered(e, n) ? 1 - 0.9 * smart : 1));
+    // Gewicht je Hieb: gedeckte Bahnen meiden (je klüger, desto konsequenter), Wiederholungen meiden,
+    // gelernt: Ziele meiden, die der Spieler oft abwehrt; gegen Zurückweichen Stiche; Berserker lieben schwere Hiebe
+    const smart = Math.min(1, e.A.smart * RE());
+    const wt = names.map(n => w.moves[n] * (n === e.lastAtk ? 0.4 : 1) * (covered(e, n) ? 1 - 0.9 * smart : 1)
+      * (1 - 0.8 * ak * share(K, 'at', bucket(ATK[n].target))) * (ATK[n].thrust ? 1 + 1.5 * ak * dodgy : 1) * (HEAVY.has(n) ? 1 + 2 * e.A.heavy : 1));
     let r = Math.random() * wt.reduce((a, b) => a + b, 0);
     for (let k = 0; k < names.length; k++) { r -= wt[k]; if (r <= 0) return names[k]; }
     return names[0];
   };
   let seq;
-  if (!e.kneel && w.combos.length && Math.random() < 0.34 * e.T.aggro) {
+  if (!e.kneel && w.combos.length && Math.random() < 0.34 * AG(e)) {
     // Kombo: Kluge beginnen mit einem Hieb, den der Spieler gerade nicht deckt
     const open = w.combos.filter(c => !covered(e, c[0]));
-    seq = pick(open.length && Math.random() < e.T.smart ? open : w.combos).slice();
+    const pool = open.length && Math.random() < e.A.smart ? open : w.combos;
+    const cw = pool.map(c => (HEAVY.has(c[0]) ? 1 + 2 * e.A.heavy : 1)); // Berserker beginnen Kombos gern mit schweren Hieben
+    let r = Math.random() * cw.reduce((a, b) => a + b, 0), ci = 0;
+    while (ci < pool.length - 1 && (r -= cw[ci]) > 0) ci++;
+    seq = pool[ci].slice();
   } else seq = [weighted()];
   let feint = null;
-  if (seq.length === 1 && !ATK[seq[0]].thrust && Math.random() < e.T.feint * opts.react) {
+  const fooled = 1 + 1.5 * ak * (share(K, 'def', 'parry') + share(K, 'def', 'shield')); // wer viel abwehrt, wird öfter getäuscht
+  if (seq.length === 1 && !ATK[seq[0]].thrust && Math.random() < e.A.feint * RE() * fooled) {
     // Finte: zu einem Hieb ausholen, den der Spieler deckt bzw. decken wird – und dann in die Blöße schlagen
     const others = names.filter(n => n !== seq[0] && !ATK[n].thrust && ATK[n].target !== ATK[seq[0]].target);
     if (others.length) feint = pick(others);
   }
   return { seq, feint };
 }
+const HEAVY = new Set(['oberhau', 'zornR', 'zornL', 'kopf']);
+const bucket = (target) => (target === 'head' || target === 'face' ? 'head' : target === 'legs' ? 'legs' : 'body');
 const keyOf = (e, t, pose) => ({ t, hp: toLocalPos(e, pose.hp, V()), bd: toLocalDir(e, pose.bd, V()) });
 function startAttack(e, name, feint = null, quick = false) {
   const A = ATK[name], w = e.wdef;
@@ -628,7 +931,9 @@ function startAttack(e, name, feint = null, quick = false) {
   }
   act.keys.push(keyOf(e, tw, A.wind));
   act.end = tw + 10;
-  e.act = act; e.lastAtk = name; e.parry = null;
+  e.act = act; e.lastAtk = name; e.parry = null; e.defStreak = 0;
+  ai.lastStart = clock;
+  e.dbg.atk = (feint ? `Finte ${feint} → ` : '') + name + (quick ? ' (schnell)' : '');
   if (!quick && Math.random() < 0.5) SFX3D.growl(chestWorld(e, t2), 'runner');
 }
 // Ende des Ausholens: Ziel festlegen (wo der Spieler JETZT ist) und die Schlagbahn dorthin bauen.
@@ -673,7 +978,7 @@ function attackCollide(e, act, t0, t1e) {
   for (let i = 1; i <= n; i++) {
     const t = lerp(t0, t1e, i / n);
     if (t < act.live0) continue;
-    if (t > act.live1) { act.done = true; act.missed = true; return; }
+    if (t > act.live1) { act.done = true; act.missed = true; observe(e.know, e.A, clock, 'def', 'dodge'); return; }
     evalAct(e, act, t, _pose);
     weaponSeg(e, w.haft, _A, _B, _pose);
     weaponSeg(e, w.edge, _EA, _EB, _pose);
@@ -693,7 +998,7 @@ function attackCollide(e, act, t0, t1e) {
     }
     if (zone) {
       act.done = true;
-      const dmg = w.dmg * e.atkDmg * opts.dmg * (zone === 'head' ? 1.5 : zone === 'legs' ? 0.8 : 1) * (act.weak || 1);
+      const dmg = w.dmg * e.atkDmg * DM() * (zone === 'head' ? 1.5 : zone === 'legs' ? 0.8 : 1) * (act.weak || 1);
       player.hit({ dmg, zone, e, type: w.type, name: act.A.name, point: _hit.clone(), from: chestWorld(e, V()) });
       return;
     }
@@ -702,6 +1007,13 @@ function attackCollide(e, act, t0, t1e) {
 // Schlag wurde abgefangen. Liefert true, wenn der Angriff damit beendet ist.
 function resolveBlock(e, act, how, obj, point) {
   const heavy = !!e.wdef.heavy;
+  observe(e.know, e.A, clock, 'def', how === 'shield' ? 'shield' : 'parry');
+  observe(e.know, e.A, clock, 'at', bucket(act.A.target));
+  // anpassungsfähige Kombo: wurde oben abgewehrt, kommt der nächste Hieb sofort unten (und umgekehrt)
+  if (e.A.adapt > 0.6 && Math.random() < 0.55 * e.A.smart * aiOpts.adapt) {
+    const tgt = bucket(act.A.target), alt = Object.keys(e.wdef.moves).filter(n => bucket(ATK[n].target) !== tgt && !(e.kneel && (n === 'oberhau' || n === 'stichHoch')));
+    if (alt.length) e.followUp = pick(alt);
+  }
   teamOpening(e); // der Spieler ist gebunden: die anderen schlagen zu
   if (how === 'parry') {
     const active = obj.speed > 1.1 || obj.twoHand; // Klinge dem Schlag entgegengeführt (oder beidhändig gehalten)
@@ -734,13 +1046,20 @@ function startRecoil(e, act, T) {
   e.recoil = { t: 0, T, back: { hp: V().lerpVectors(e.wp.hp, wind.hp, 0.55), bd: slerpDir(e.wp.bd, wind.bd, 0.5, V()) } };
   e.act = null; e.queue.length = 0;
   e.cool = Math.max(e.cool, rand(0.25, 0.7));
+  if (e.followUp) { e.recoil.T *= 0.65; e.cool = 0.05; e.dbg.why = 'passt Kombo an'; } // sofort ins andere Ziel nachsetzen
 }
 function finishAttack(e) {
   const act = e.act;
   e.act = null;
+  // schwerer Hieb ins Leere: überzogen, stolpert nach vorn – offen für einen Konter
+  if (act.missed && (e.wdef.heavy || HEAVY.has(act.name)) && Math.random() < e.A.overext) {
+    e.stagger = 0.45 + 0.35 * e.A.overext; e.staggerDir = -1; e.queue.length = 0; note(e, 'überzieht den Hieb!', '#7dffa8'); e.cool = rand(0.6, 1); return;
+  }
   if (e.queue.length && !act.missed) { startAttack(e, e.queue.shift(), null, true); return; }
+  // Mensur: Elite und Vorsichtige gehen nach dem Angriff wieder aus der Reichweite
+  if ((e.persona === 'elite' || e.persona === 'cautious') && !e.kneel && Math.random() < 0.55) e.dodge = { t: 0.26 };
   e.queue.length = 0;
-  e.cool = rand(0.7, 1.5) / e.T.aggro * (e.daze > 0 ? 1.5 : 1) * (e.hurt.torso ? 1.3 : 1) * (e.hp < e.maxHp * 0.5 ? 1.35 : 1) * (e.stam < 25 ? 1.4 : 1) + (act.missed ? 0.35 : 0);
+  e.cool = rand(0.7, 1.5) / AG(e) * (e.daze > 0 ? 1.5 : 1) * (e.hurt.torso ? 1.3 : 1) * (e.hp < e.maxHp * 0.5 ? 1.35 : 1) * (e.stam < 25 ? 1.4 : 1) + (act.missed ? 0.35 : 0);
   // andere drankommen lassen
   if (enemies.some(o => o !== e && o.state === 'fight' && !o.token && !o.passive)) { release(e); e.tokenBan = rand(0.8, 1.8); }
 }
@@ -749,6 +1068,26 @@ function updateAttack(e, dt, d, dx, dz) {
   act.t += dt;
   if (!act.locked) {
     turnTo(e, player.head.x, player.head.z, dt, 3.5);
+    // Angriff abbrechen: der Spieler kommt mit einem schnellen Hieb/Stich zuvor (Kluge brechen ab und parieren)
+    if (!act.checked && act.t > 0.08) {
+      const th = threatBlade(e);
+      if (th) {
+        act.checked = true;
+        if (e.A.smart > 0.55 && Math.random() < e.A.counter * 0.6 * RE()) { e.act = null; e.queue.length = 0; e.cool = Math.max(e.cool, 0.2); planDefense(e, th, 0.04); e.dbg.why = 'bricht Angriff ab'; return; }
+      }
+    }
+    // Finte nach Lage: deckt der Spieler die Bahn jetzt, setzt ein Elite-Kämpfer im Ausholen um
+    if (e.persona === 'elite' && !act.feint && !act.switched && act.t > act.tw * 0.35 && (frame & 3) === 0 && covered(e, act.name)) {
+      const alt = Object.keys(e.wdef.moves).filter(n => n !== act.name && !covered(e, n));
+      if (alt.length) {
+        act.switched = true;
+        const n2 = pick(alt), A2 = ATK[n2];
+        act.name = n2; act.A = A2; act.keys = [{ t: 0, hp: e.wp.hp.clone(), bd: e.wp.bd.clone() }, keyOf(e, 0.24 * e.atkSlow, A2.wind)];
+        act.t = 0; act.tw = 0.24 * e.atkSlow; act.end = act.tw + 10;
+        e.dbg.atk = `umgesetzt → ${n2}`;
+        return;
+      }
+    }
     if (act.t >= act.tw) {
       if (d > e.wdef.range + 1.0) { e.act = null; e.queue.length = 0; e.cool = 0.3; return; } // Spieler weg: nicht ins Leere schlagen
       lockAttack(e, act);
@@ -781,13 +1120,23 @@ function updateBash(e, dt, d) {
       b.done = true;
       const blockedBy = player.shields.find(s => s.c.distanceTo(_sc) < 0.5);
       if (blockedBy) { player.blocked({ how: 'shield', point: _sc.clone(), e, w: blockedBy.w }); e.stagger = 0.35; }
-      else player.hit({ dmg: 7 * opts.dmg, zone: 'body', e, type: 'blunt', name: 'Schildstoß', point: _hit.clone(), from: _sc.clone(), bash: true });
+      else player.hit({ dmg: 7 * DM(), zone: 'body', e, type: 'blunt', name: 'Schildstoß', point: _hit.clone(), from: _sc.clone(), bash: true });
     }
   }
   if (b.t > 0.8) { e.bash = null; e.cool = rand(0.5, 1.1); }
 }
 
 // ---- Reaktionen auf Angriffe des Spielers: Schild führen, parieren, ausweichen -------------------
+// schnelle Klinge des Spielers, die auf den Gegner zukommt (oder null)
+function threatBlade(e) {
+  const chest = chestWorld(e, t1);
+  for (const b of player.blades) {
+    if (b.speed < 1.4 || b.b.distanceTo(chest) > 1.25) continue;
+    if (b.vel.dot(t2.subVectors(chest, b.b)) <= 0) continue;
+    return b;
+  }
+  return null;
+}
 function reactions(e, dt) {
   if (e.parry) { e.parry.t += dt; if (e.parry.t > e.parry.T) e.parry = null; }
   if (e.shieldHold > 0) { e.shieldHold -= dt; if (e.shieldHold <= 0) e.shieldZone = 'mid'; }
@@ -796,47 +1145,98 @@ function reactions(e, dt) {
     if (e.react.delay <= 0) {
       const r = e.react; e.react = null;
       if (r.kind === 'shield') { e.shieldZone = r.zone; e.shieldHold = 0.9; }
-      else if (r.kind === 'parry') e.parry = { zone: r.zone, t: 0, T: 0.6 };
+      else if (r.kind === 'parry') e.parry = { zone: r.zone, t: 0, T: 0.6, hp: r.hp, bd: r.bd };
       else if (r.kind === 'dodge') e.dodge = r.side ? { t: 0.24, dx: Math.cos(e.yaw) * r.side, dz: -Math.sin(e.yaw) * r.side, v: 2.6 } : { t: 0.26 };
     }
   }
   // Bedrohung: eine schnelle Klinge nähert sich
-  let threat = null;
-  const chest = chestWorld(e, t1);
-  for (const b of player.blades) {
-    if (b.speed < 1.4 || b.b.distanceTo(chest) > 1.25) continue;
-    if (b.vel.dot(t2.subVectors(chest, b.b)) <= 0) continue;
-    threat = b; break;
-  }
+  const threat = threatBlade(e);
   if (!threat) {
     e.threatT += dt;
     if (e.threatT > 0.25 && e.threatOn) {
       e.threatOn = false;
-      // der Hieb des Spielers ging ins Leere: sofort kontern
-      if (clock - e.lastHitT > 0.6 && e.token && Math.random() < e.T.smart * opts.react) e.cool = Math.min(e.cool, 0.1);
-      else if (clock - e.lastHitT > 0.6) teamOpening(null);
+      // der Hieb des Spielers ging ins Leere: kontern (wer gelernt hat, dass der Spieler oft verfehlt, lauert darauf)
+      if (clock - e.lastHitT > 0.6) {
+        observe(e.know, e.A, clock, 'miss', null);
+        const ak = e.A.adapt * aiOpts.adapt;
+        if (e.token && Math.random() < e.A.counter * RE() * (1 + ak * Math.min(1, e.know.miss / 4))) { e.cool = Math.min(e.cool, 0.1); e.dbg.why = 'kontert Fehlschlag'; }
+        else teamOpening(null);
+      }
     }
     return;
   }
   e.threatT = 0;
   if (e.threatOn) return;
   e.threatOn = true; // je Schwung eine Entscheidung
-  const L = e.body.worldToLocal(t3.copy(threat.b));
+  planDefense(e, threat, -1);
+}
+// Abwehr planen: Art des Hiebs wahrnehmen (lernen), Vorhersage aus dem Gelernten, Abwehr wählen
+const _tl = V(), _bl = V(), _pc = V();
+function planDefense(e, threat, delayOverride) {
+  const L = e.body.worldToLocal(_tl.copy(threat.b));
   if (L.z < -0.1) return; // von hinten: keine Chance
+  // Wahrnehmung: woher kommt der Hieb? (Stich = Bewegung entlang der Klinge)
+  _bl.subVectors(threat.b, threat.a).normalize();
+  const thrust = Math.abs(t3.copy(threat.vel).normalize().dot(_bl)) > 0.7;
+  const kind = thrust ? 'thrust' : L.y > 1.42 - e.drop ? 'high' : L.y < 0.88 - e.drop ? 'low' : L.x > 0 ? 'left' : 'right';
+  observe(e.know, e.A, clock, 'sw', kind);
+  // Vorhersage: kommt er so, wie er es meistens tut, ist der Gegner vorbereitet (schneller, sicherer)
+  const ak = Math.min(1.5, e.A.adapt * aiOpts.adapt), expect = share(e.know, 'sw', kind);
+  const prepared = 1 + 1.2 * ak * expect;
+  // keine endlosen Abwehrschleifen: nach mehreren Abwehren hintereinander bricht er aus (Gegenangriff oder Rückzug)
+  e.defStreak++;
+  if (e.defStreak >= 4 && e.token && !e.kneel) {
+    e.defStreak = 0;
+    if (e.persona === 'cautious' || e.persona === 'fearful') { e.dodge = { t: 0.3 }; e.dbg.why = 'löst sich (zu viel Druck)'; }
+    else { e.cool = 0; e.dbg.why = 'bricht aus der Deckung aus'; }
+    return;
+  }
+  e.stam = Math.max(0, e.stam - 3);
   // Reaktionsgüte: benommen schlecht, erschöpft schlechter, verwundet vorsichtiger (deckt öfter)
-  const skill = opts.react * (e.daze > 0 ? 0.25 : 1) * (e.stam < 20 ? 0.6 : 1) * (e.hp < e.maxHp * 0.5 ? 1.25 : 1) * (e.beaten > 0 ? 0 : 1), r = -L.x * e.handed;
-  const delay = e.T.react * rand(0.8, 1.3) / opts.react * (e.daze > 0 ? 1.6 : 1);
+  const skill = RE() * prepared * (e.daze > 0 ? 0.25 : 1) * (e.stam < 20 ? 0.6 : 1) * (e.hp < e.maxHp * 0.5 ? 1.25 : 1) * (e.beaten > 0 ? 0 : 1), r = -L.x * e.handed;
+  const delay = delayOverride >= 0 ? delayOverride : e.A.react * rand(0.8, 1.3) / RE() * (e.daze > 0 ? 1.6 : 1) * (1 - 0.45 * Math.min(1, ak * expect * 1.5));
+  e.dbg.delay = delay; e.dbg.expect = expect; e.dbg.seen = kind; e.dbg.n = (e.dbg.n || 0) + 1;
   if (e.shield && armOk(e, 1 - wArm(e))) {
-    if (Math.random() < e.T.guard * skill * (e.hurt[zoneOfArm(1 - wArm(e))] ? 0.6 : 1)) e.react = { kind: 'shield', zone: L.y > 1.42 - e.drop ? 'high' : L.y < 0.88 - e.drop ? 'low' : 'mid', delay };
-  } else if (e.weapon && e.weaponId !== 'bow' && armOk(e, wArm(e)) && Math.random() < e.T.parry * skill * (e.hurt[zoneOfArm(wArm(e))] ? 0.5 : 1)) {
-    e.react = { kind: 'parry', zone: L.y > 1.5 - e.drop ? 'high' : L.y < 0.85 - e.drop ? 'low' : r > 0 ? 'right' : 'left', delay };
-  } else if (!e.kneel && Math.random() < e.T.dodge * skill) e.react = { kind: 'dodge', delay: 0.05, side: Math.random() < 0.45 ? (r > 0 ? -1 : 1) * e.handed : 0 };
+    if (Math.random() < DF(e.A.guard) * skill * (e.hurt[zoneOfArm(1 - wArm(e))] ? 0.6 : 1)) e.react = { kind: 'shield', zone: L.y > 1.42 - e.drop ? 'high' : L.y < 0.88 - e.drop ? 'low' : 'mid', delay };
+  } else if (e.weapon && e.weaponId !== 'bow' && armOk(e, wArm(e)) && Math.random() < DF(e.A.parry) * skill * (e.hurt[zoneOfArm(wArm(e))] ? 0.5 : 1)) {
+    // dynamische Parade: Waffe quer zur heranfliegenden Klinge, zwischen Brust und Hieb
+    const zone = L.y > 1.5 - e.drop ? 'high' : L.y < 0.85 - e.drop ? 'low' : r > 0 ? 'right' : 'left';
+    _pc.set(0, 1.22 - e.drop, 0.1);
+    const to = t4.subVectors(L, _pc);
+    const dist = to.length();
+    let hp = null, bd = null;
+    if (dist > 0.05) {
+      to.divideScalar(dist);
+      const BL = t5.copy(_bl).transformDirection(m1.copy(e.body.matrixWorld).invert()).normalize();
+      bd = V().crossVectors(BL, to);
+      if (bd.lengthSq() > 0.05) {
+        bd.normalize(); if (bd.y < -0.2) bd.negate();
+        hp = V().copy(_pc).addScaledVector(to, 0.4).addScaledVector(bd, -e.wdef.haft[1] * 0.45);
+        hp.y = clamp(hp.y, 0.7 - e.drop, 1.75 - e.drop); hp.z = Math.max(hp.z, 0.22);
+      } else bd = null;
+    }
+    e.react = { kind: 'parry', zone, delay, hp, bd };
+  } else if (!e.kneel && Math.random() < DF(e.A.dodge) * skill) e.react = { kind: 'dodge', delay: 0.05, side: Math.random() < 0.45 ? (r > 0 ? -1 : 1) * e.handed : 0 };
+}
+// Der Gegner hat einen Hieb des Spielers pariert: was jetzt? (Riposte, aus der Bindung stechen, Stoß, Rückzug)
+export function enemyParried(e) {
+  if (e.state !== 'fight' || e.passive) return;
+  const P = e.persona, r = Math.random();
+  const moves = e.wdef.moves;
+  if (P === 'berserker' && !e.kneel && r < 0.5) { e.kick = { t: 0, done: false }; e.dbg.why = 'Parade → Tritt'; }
+  else if ((P === 'cautious' || P === 'fearful') && r < 0.45) { e.dodge = { t: 0.28 }; e.dbg.why = 'Parade → Rückzug'; }
+  else if (r < e.A.counter + 0.15) {
+    e.followUp = P === 'elite' && moves.stich ? 'stich' : pick(Object.keys(moves));
+    if (!e.token && tokens.size < opts.tokens + 1) { tokens.add(e); e.token = true; }
+    e.cool = 0; e.parry = null;
+    e.dbg.why = P === 'elite' ? 'Parade → Stich aus der Bindung' : 'Parade → Riposte';
+  }
 }
 // Waffe und Schild in die Grundstellung (oder Parade) führen
 function guardPose(e, dt, low = 0) {
   const w = e.wdef;
   let rate = 9;
-  if (e.parry) { toLocalPos(e, PARRY[e.parry.zone].hp, t1); toLocalDir(e, PARRY[e.parry.zone].bd, t2); rate = 22; }
+  if (e.parry) { if (e.parry.hp) { t1.copy(e.parry.hp); t2.copy(e.parry.bd); } else { toLocalPos(e, PARRY[e.parry.zone].hp, t1); toLocalDir(e, PARRY[e.parry.zone].bd, t2); } rate = 22; }
   else if (e.taunt) { // Drohgebärde: Waffe hochreißen und brüllen bzw. auf den Schild schlagen
     const k = e.taunt.t / e.taunt.T;
     if (e.taunt.kind === 'bang' && e.shield) { t1.copy(e.sp.c).addScaledVector(e.sp.n, 0.12 + 0.1 * Math.abs(Math.cos(k * Math.PI * 3))); t1.y += 0.12; t2.set(-0.5 * e.handed, 0.6, 0.6).normalize(); rate = 18; }
@@ -913,10 +1313,10 @@ function archer(e, dt, d, dx, dz, sameLevel) {
       // Zielpunkt: Brust – außer der Schild des Spielers deckt sie, dann Kopf oder Beine
       const aim = t3.copy(player.head), spots = [-0.32, -0.02, -(player.head.y - player.floor - 0.55)];
       let off = spots[0];
-      if (Math.random() < e.T.smart * opts.react) for (const o of spots) { off = o; t4.copy(player.head).setY(player.head.y + o); if (!player.shields.some(sh => segDisc(from, t4, sh.c, sh.n, sh.r + 0.04, 0.1, _hit))) break; }
+      if (Math.random() < e.A.smart * RE()) for (const o of spots) { off = o; t4.copy(player.head).setY(player.head.y + o); if (!player.shields.some(sh => segDisc(from, t4, sh.c, sh.n, sh.r + 0.04, 0.1, _hit))) break; }
       aim.y += off; aim.addScaledVector(player.vel, tt * 0.6); aim.y += 0.5 * 9.81 * 0.5 * tt * tt;
       const dir = aim.sub(from).normalize();
-      const err = 0.035 / opts.react * (e.hurt.armR || e.hurt.armL ? 2 : 1);
+      const err = 0.035 / RE() * (e.hurt.armR || e.hurt.armL ? 2 : 1);
       dir.x += rand(-err, err); dir.y += rand(-err, err); dir.z += rand(-err, err); dir.normalize();
       const obj = makeArrowMesh(2);
       obj.position.copy(from);
@@ -924,7 +1324,7 @@ function archer(e, dt, d, dx, dz, sameLevel) {
       shots.push({ obj, vel: dir.clone().multiplyScalar(v), life: 5, stuck: false, e });
       SFX3D.swing(from);
       a.phase = 'idle'; a.t = 0;
-      e.cool = rand(2.2, 3.6) / e.T.aggro;
+      e.cool = rand(2.2, 3.6) / AG(e);
       e.strafe = -e.strafe; e.strafeT = rand(1.5, 3); // Stellung wechseln
     }
   }
@@ -983,7 +1383,7 @@ function updateShots(dt) {
     }
     if (zone) {
       scene.remove(s.obj); shots.splice(i, 1);
-      player.hit({ dmg: EW.bow.dmg * opts.dmg * (zone === 'head' ? 1.5 : zone === 'legs' ? 0.8 : 1), zone, e: s.e, type: 'thrust', name: 'Pfeil', point: _hit.clone(), from: s.obj.position.clone(), arrow: true });
+      player.hit({ dmg: EW.bow.dmg * DM() * (zone === 'head' ? 1.5 : zone === 'legs' ? 0.8 : 1), zone, e: s.e, type: 'thrust', name: 'Pfeil', point: _hit.clone(), from: s.obj.position.clone(), arrow: true });
       continue;
     }
     const len = a.distanceTo(b);
@@ -1009,12 +1409,21 @@ function fight(e, dt) {
   e.lean = 0; e.twist = 0;
   // Erholung: Gleichgewicht und Ausdauer kommen zurück, wenn er nicht angreift
   e.balT -= dt;
-  if (e.balT <= 0) e.bal = Math.min(e.T.balance, e.bal + dt * 25);
+  if (e.balT <= 0) e.bal = Math.min(e.A.balance, e.bal + dt * 25);
   if (!e.act) e.stam = Math.min(100, e.stam + dt * (e.token ? 10 : 18));
   if (e.bindOff) e.bindOff.multiplyScalar(Math.exp(-dt * 1.2)); // er drückt langsam zurück in seine Deckung
+  if (e.getup) { guardPose(e, dt, 1); return; } // steht gerade auf
+  if (e.down && e.down.rag) { // Ragdoll-Sturz: fällt (Physik), liegt benommen, orientiert sich, steht auf
+    const D = e.down;
+    D.t += dt;
+    if (e.stagger > 0) e.stagger -= dt;
+    if (e.rag && e.rag.state === 'frozen' && D.t > 1.2) { e.head.rotation.y = Math.sin(clock * 1.4 + e.slot * 5) * 0.35; e.head.updateMatrixWorld(true); } // sieht sich um
+    if (D.t >= D.T && (!e.rag || e.rag.state !== 'active' || D.t > D.T + 1.5)) { e.down = null; beginGetUp(e); e.cool = rand(0.6, 1.1); }
+    return;
+  }
   if (e.beaten > 0) { e.beaten -= dt; guardPose(e, dt, 0.5); return; } // Deckung weggeschlagen: kurz offen
   if (e.rearm && !e.down && e.stagger <= 0 && !e.passive && rearm(e, dt, d)) return;
-  if (e.down) { // am Boden: fällt, liegt (wehrlos), rappelt sich wieder auf
+  if (e.down) { // am Boden (ohne Ragdoll, Budget voll): fällt, liegt (wehrlos), rappelt sich wieder auf
     const D = e.down;
     D.t += dt;
     const k = D.t < 0.45 ? D.t / 0.45 : D.t < D.T - 0.9 ? 1 : Math.max(0, (D.T - D.t) / 0.9);
@@ -1024,9 +1433,10 @@ function fight(e, dt) {
     if (D.t >= D.T) { e.down = null; e.downK = 0; e.cool = rand(0.4, 0.9); }
     return;
   }
-  if (e.stagger > 0) { // getroffen: taumelt, Deckung offen
+  if (e.stagger > 0) { // getroffen: taumelt (stolpert ein paar Schritte), Deckung offen
     e.stagger -= dt;
     e.lean = -0.3 * Math.min(1, e.stagger * 3) * e.staggerDir;
+    if (!e.kneel) { const k = -0.7 * Math.min(1, e.stagger * 2) * e.staggerDir * e.moveMul * dt; tryMove(e, Math.sin(e.yaw) * k, Math.cos(e.yaw) * k, true); }
     guardPose(e, dt, 0.6);
     return;
   }
@@ -1039,6 +1449,7 @@ function fight(e, dt) {
     return;
   }
   if (e.passive) { guardPose(e, dt); return; }
+  if (e.grab) updateGrab(e, dt);
   if (e.act) { updateAttack(e, dt, d, dx, dz); return; }
   if (e.bash) { turnTo(e, player.head.x, player.head.z, dt, 3); updateBash(e, dt, d); guardPose(e, dt); return; }
   if (e.kick) { turnTo(e, player.head.x, player.head.z, dt, 3); updateKick(e, dt); guardPose(e, dt); return; }
@@ -1053,7 +1464,7 @@ function fight(e, dt) {
   const canAttack = armOk(e, wArm(e));
   const allies = enemies.filter(o => o !== e && o.state === 'fight' && !o.passive && !o.down).length;
   // Schwer verletzt und nicht allein: hinter die anderen zurückziehen und verschnaufen
-  if (!e.retreated && allies > 0 && e.hp < e.maxHp * 0.4 && e.T.smart > 0.5 && !e.kneel) { e.retreated = true; release(e); e.tokenBan = rand(4, 6.5); e.slot = 1.2; note(e, 'zieht sich zurück', '#9ad'); }
+  if (!e.retreated && allies > 0 && e.hp < e.maxHp * 0.4 && e.A.smart > 0.5 && !e.kneel) { e.retreated = true; release(e); e.tokenBan = rand(4, 6.5); e.slot = 1.2; note(e, 'zieht sich zurück', '#9ad'); }
   // Rolle: Angreifer (hat eine „Marke“) oder Wartender, der den Spieler umkreist.
   // Wer dem Spieler im Rücken steht, bekommt den Vortritt.
   e.tokenBan -= dt;
@@ -1063,7 +1474,7 @@ function fight(e, dt) {
   // Wird auf mich gezielt? Schildträger entscheiden einmal je Zielvorgang, ob sie den Schild richtig halten
   const aimed = aimedAt(e);
   if (!aimed) e.aimRoll = -1;
-  else if (e.aimRoll < 0) e.aimRoll = e.shield && armOk(e, 1 - wArm(e)) && Math.random() < Math.min(0.97, (e.T.guard + 0.1) * opts.react) ? 1 : 0;
+  else if (e.aimRoll < 0) e.aimRoll = e.shield && armOk(e, 1 - wArm(e)) && Math.random() < Math.min(0.97, (DF(e.A.guard) + 0.1) * RE()) ? 1 : 0;
   // Bewegung: weit weg oder Hindernis → Laufweg (mit Klettern), sonst Beinarbeit
   e.pathMode -= dt;
   const turn = (e.T.speed > 0.7 ? 4.2 : 2.8) * (e.daze > 0 ? 0.5 : 1) * Math.max(0.5, e.moveMul);
@@ -1075,6 +1486,7 @@ function fight(e, dt) {
   e.losT -= dt;
   if (e.losT <= 0) { e.losT = 0.4; const eye = e.head.getWorldPosition(t1), dir = t2.subVectors(player.head, eye), len = dir.length(); raycaster.set(eye, dir.normalize()); raycaster.far = len; e.los = raycaster.intersectObjects(roomOccluders(), false).length === 0; }
   reactions(e, dt);
+  if (!e.grab && e.weaponId !== 'bow') tryGrab(e, dt, d);
   // Wartende drohen: brüllen mit erhobener Waffe oder schlagen auf den Schild
   if (e.taunt) { e.taunt.t += dt; if (e.taunt.kind === 'bang' && Math.floor(e.taunt.t / e.taunt.T * 3) !== e.taunt.n) { e.taunt.n = Math.floor(e.taunt.t / e.taunt.T * 3); SFX.thud(0.25); SFX.click(700, 0.2, 0.04); } if (e.taunt.t >= e.taunt.T) e.taunt = null; }
   else if (!e.token && e.fighting && !e.kneel && !aimed) {
@@ -1083,15 +1495,18 @@ function fight(e, dt) {
   }
   // Grundstellung wechseln (Pflug, Ochs, Alber, vom Tag)
   e.stanceT -= dt;
-  if (e.stanceT <= 0) { e.stanceT = rand(2.2, 5); e.stance = e.T.smart > 0.4 && Math.random() < 0.7 ? Math.floor(Math.random() * STANCES.length) : 0; }
-  // Angriff beginnen
+  if (e.stanceT <= 0) { e.stanceT = rand(2.2, 5); e.stance = e.A.smart > 0.4 && Math.random() < 0.7 ? Math.floor(Math.random() * STANCES.length) : 0; }
+  // Angriff beginnen – nie gleichzeitig mit einem anderen (gestaffelt), Ängstliche zögern
   e.cool -= dt;
-  if (e.token && e.cool <= 0 && !e.parry && !e.react && sameLevel && d < e.wdef.range + 0.3) {
+  if (e.token && e.cool <= 0 && !e.parry && !e.react && sameLevel && d < e.wdef.range + 0.3 && clock - ai.lastStart > 0.32) {
     const facing = Math.sin(e.yaw) * dx + Math.cos(e.yaw) * dz;
-    if (facing > 0.92) {
+    if (facing > 0.92 && e.A.hesitate > 0 && !e.followUp && Math.random() < e.A.hesitate * (1 - e.morale / 100) * 1.2) {
+      e.cool = rand(0.5, 1.1); e.dodge = { t: 0.18 }; e.dbg.why = 'zögert'; if (Math.random() < 0.35) note(e, 'zögert …', '#c9a0ff');
+    } else if (facing > 0.92 && e.followUp) { const n = e.followUp; e.followUp = null; if (e.wdef.moves[n]) startAttack(e, n, null, true); }
+    else if (facing > 0.92) {
       // Der Spieler verschanzt sich hinter dem Schild: wegtreten (dann schlagen die anderen zu) oder mit dem Schild rammen
       const turtled = clock >= player.shieldStun && player.shields.some(sh => segDisc(chestWorld(e, t1), t2.copy(player.head).setY(player.head.y - 0.34), sh.c, sh.n, sh.r, 0.12, _hit));
-      if (turtled && d < 1.35 && !e.kneel && Math.random() < 0.35 * e.T.smart + 0.08) e.kick = { t: 0, done: false };
+      if (turtled && d < 1.35 && !e.kneel && Math.random() < 0.35 * e.A.smart + 0.08) e.kick = { t: 0, done: false };
       else if (e.shield && d < 1.15 && Math.random() < 0.22) e.bash = { t: 0, done: false };
       else { const c = chooseAttack(e); e.queue = c.seq.slice(1); startAttack(e, c.seq[0], c.feint); }
     }
@@ -1143,7 +1558,7 @@ function updateKick(e, dt) {
       e.cool = Math.min(e.cool, 0.2);
     } else {
       _top.copy(player.head); _top.y -= 0.3; _bot.copy(player.head); _bot.y -= 0.95;
-      if (segPoint(_top, _bot, foot, _hit) < 0.36) player.hit({ dmg: 6 * opts.dmg, zone: 'body', e, type: 'blunt', name: 'Tritt', point: _hit.clone(), from: chestWorld(e, V()) });
+      if (segPoint(_top, _bot, foot, _hit) < 0.36) player.hit({ dmg: 6 * DM(), zone: 'body', e, type: 'blunt', name: 'Tritt', point: _hit.clone(), from: chestWorld(e, V()) });
     }
   }
   if (k.t > 0.85) { e.kick = null; e.cool = Math.max(e.cool, rand(0.3, 0.7)); }
@@ -1256,7 +1671,18 @@ function pose(e, dt) {
     for (const tryS of [e.wdef.twoH, 0.3, 0.16]) { s = tryS; if (t1.copy(e.wp.hp).addScaledVector(e.wp.bd, tryS).distanceTo(S) <= REACH) break; }
     solveArm(e, oa, t1.copy(e.wp.hp).addScaledVector(e.wp.bd, s));
   } else if (fighting) solveArm(e, oa, t1.set(e.arms[oa].sx * 0.2, 1.14 - e.drop, 0.27)); // freie Hand vor der Brust
-  else limpArm(e, oa, -sw);
+  else if (e.state !== 'yield') limpArm(e, oa, -sw);
+  // freie Hand greift nach der Waffe des Spielers bzw. hält sie fest
+  if (e.grab) {
+    const g = e.grab, k = g.phase === 'reach' ? THREE.MathUtils.smoothstep(g.t / 0.28, 0, 1) : 1;
+    solveArm(e, g.hand, t1.lerpVectors(g.from, g.local, k));
+  }
+  // ergeben: beide Hände hoch
+  if (e.state === 'yield') {
+    const k = Math.min(1, e.t / 0.5);
+    for (let i = 0; i < 2; i++) if (armOk(e, i)) solveArm(e, i, t1.set(e.arms[i].sx * lerp(0.2, 0.3, k), lerp(1.0, 1.78, k) - e.drop, lerp(0.25, 0.12, k)));
+    if (e.morale < 30) e.torso.rotation.z += Math.sin(clock * 23) * 0.01; // zittert
+  }
 }
 // Kletter-Haltung (durchs Fenster / auf ein Hindernis)
 function climbPose(e, k) {
@@ -1269,6 +1695,8 @@ function climbPose(e, k) {
 // ---- Hauptschleife ------------------------------------------------------------------------------
 export function updateEnemies(dt) {
   frame++; clock += dt;
+  updateRagdolls(dt);  // nach dem Physik-Schritt: Ragdoll-Körper → Knochen
+  updateRagArrows(dt);
   updateShots(dt);
   tactics(dt);
   for (let i = enemies.length - 1; i >= 0; i--) {
@@ -1276,6 +1704,11 @@ export function updateEnemies(dt) {
     e.t += dt;
     e.moved = 0;
     if (e.state === 'dead') { deadUpdate(e, dt); continue; }
+    // Wissen über den Spieler: gestaffelt alle 0,5 s aktualisieren (Verzögerung + Vergessen)
+    const K = e.know;
+    K.acc = (K.acc || 0) + dt; K.tick -= dt;
+    if (K.tick <= 0) { tickKnow(K, K.acc, clock); K.acc = 0; K.tick = 0.5; }
+    if (e.state === 'fight' && !e.passive) moraleTick(e, dt);
     if (e.daze > 0) e.daze -= dt;
     // Blutung
     if (e.bleed > 0.05) {
@@ -1316,9 +1749,12 @@ export function updateEnemies(dt) {
       if (k >= 1) { e.y = c.to.y; e.state = c.back === 'flee' ? 'flee' : 'fight'; e.path = null; e.climb = null; SFX3D.step(t1.copy(e.pos).setY(e.y), 1.1); }
     } else if (e.state === 'fight') {
       fight(e, dt);
+      if (e.down && e.down.rag) { e.prevPos.copy(e.pos); continue; } // liegt als Ragdoll: Physik bewegt den Körper
       shieldPose(e, dt);
       const g = groundAt(e.pos.x, e.pos.z);
       if (Math.abs(g - e.y) <= STEP) e.y = lerp(e.y, g, Math.min(1, dt * 10));
+    } else if (e.state === 'yield') {
+      yieldUpdate(e, dt);
     } else if (e.state === 'flee') { // zur nächsten Tür/zum Fenster und hinaus
       e.fighting = false;
       if (Math.hypot(e.exitIn.x - e.pos.x, e.exitIn.z - e.pos.z) < 0.35) { e.state = 'exit'; e.t = 0; e.climbFrom = e.pos.clone(); }
@@ -1330,14 +1766,14 @@ export function updateEnemies(dt) {
         e.pos.lerpVectors(e.climbFrom, e.exitOut, THREE.MathUtils.smoothstep(k, 0.2, 0.9));
         e.body.position.y = Math.sin(k * Math.PI) * sill / e.scale;
         e.yaw = Math.atan2(e.exitOut.x - e.climbFrom.x, e.exitOut.z - e.climbFrom.z);
-        if (k >= 1) { player.defeated(e, 'fled'); removeEnemy(e); continue; }
-      } else if (walkTo(e, e.exitOut, dt, false, 1.35)) { player.defeated(e, 'fled'); removeEnemy(e); continue; }
+        if (k >= 1) { if (!e.sentAway) player.defeated(e, 'fled'); removeEnemy(e); continue; }
+      } else if (walkTo(e, e.exitOut, dt, false, 1.35)) { if (!e.sentAway) player.defeated(e, 'fled'); removeEnemy(e); continue; }
       guardPose(e, dt, 1);
     }
     // Abstand zu anderen Gegnern und zum Spieler
     if (e.state === 'fight' && !e.passive) {
       for (const o of enemies) {
-        if (o === e || o.state === 'dead' || Math.abs(o.y - e.y) > 0.5) continue;
+        if (o === e || o.state === 'dead' || (o.down && o.down.rag) || Math.abs(o.y - e.y) > 0.5) continue;
         const ox = e.pos.x - o.pos.x, oz = e.pos.z - o.pos.z, od = Math.hypot(ox, oz);
         if (od > 0.001 && od < 0.6) { const p = (0.6 - od) * 0.5 * Math.min(1, dt * 10); tryMove(e, ox / od * p, oz / od * p, true); }
       }
@@ -1347,16 +1783,29 @@ export function updateEnemies(dt) {
     if (e.state === 'climbIn' || e.state === 'climbUp' || (e.state === 'exit' && e.opening.type === 'window')) {
       const k = e.state === 'climbUp' ? Math.min(1, e.climb ? e.climb.t / e.climb.T : 1) : Math.min(1, e.t / 1.6);
       pose(e, dt); climbPose(e, k);
-    } else pose(e, dt);
+    } else { pose(e, dt); if (e.getup) applyGetUp(e, dt); }
     // Schritte hörbar
     const stepPh = Math.floor(e.phase / Math.PI);
     if (stepPh !== e.stepPh) { e.stepPh = stepPh; if (e.gait > 0.5) SFX3D.step(t1.copy(e.pos).setY(e.y), e.type === 'knight' ? 1.3 : 0.7); }
     place(e);
+    // eigene Geschwindigkeit (geht in den Sturz ein)
+    if (dt > 0) e.vel.lerp(t1.subVectors(e.pos, e.prevPos).divideScalar(dt), 0.3);
+    e.prevPos.copy(e.pos);
   }
 }
 // Sterben: Knie geben nach, Körper kippt um und bleibt liegen, verschwindet nach einer Weile
 function deadUpdate(e, dt) {
   const t = e.t;
+  if (e.ragDead) { // Ragdoll: die Physik hat ihn hingelegt; nach einer Weile versinkt er
+    if (!e.landed && t > 0.6) { e.landed = true; SFX.thud(0.5); if (e.inj.torso + e.inj.head + e.bleed * 10 > 15) floorDecal(e.hips.getWorldPosition(t1).setY(0), 'blood', rand(0.5, 0.8)); }
+    if (t > 9) {
+      if (e.rag && e.rag.state === 'active') freezeRagdoll(e.rag);
+      e.body.position.y -= dt * 0.25 / e.scale;
+      if (t > 10.5) { removeEnemy(e); return; }
+      e.root.updateMatrixWorld(true);
+    }
+    return;
+  }
   if (t < 1.0) {
     const k1 = Math.min(1, t / 0.3), k2 = clamp((t - 0.2) / 0.7, 0, 1), ease = k2 * k2 * (3 - 2 * k2);
     e.hips.position.y = lerp(e.hips.position.y, HIP - 0.3 * k1 * (1 - ease), 0.5);
@@ -1393,4 +1842,54 @@ export function warmupGroup() {
 }
 export function boneOf(e, zone) {
   return zone === 'head' ? e.head : zone === 'torso' ? e.torso : zone === 'armR' ? e.arms[0].top : zone === 'armL' ? e.arms[1].top : zone === 'legR' ? e.legs[0].top : e.legs[1].top;
+}
+
+// ---- Gefallene anstoßen: Treffer auf einen Liegenden/Toten bewegt den Körper (Ragdoll wird bei Bedarf reaktiviert) ----
+export function corpseTest(a, b, radius = 0.03) {
+  for (const e of enemies) {
+    if (!(e.state === 'dead' && e.t < 9) && !(e.down && e.down.rag)) continue;
+    if (segPoint(a, b, e.hips.getWorldPosition(_mid)) > 1.4) continue;
+    for (const z of zones(e)) if (segSeg(a, b, z.a, z.b, _c1, _c2) - z.r - radius < 0) return { e, zone: z.zone, point: _c1.clone() };
+  }
+  return null;
+}
+export function pushCorpse(e, point, dir, power) {
+  if (e.down && e.down.rag) return false; // Lebende am Boden: über applyHit
+  if (e.rag && e.rag.state === 'active') { pokeRagdoll(e.rag, point, dir, power); return true; }
+  const R = startRagdoll(e, { point, dir, power });
+  if (R) { e.ragDead = true; e.t = Math.min(e.t, 6); }
+  return !!R;
+}
+
+// ---- Test-Menü: gezielt auslösen ----------------------------------------------------------------------
+export const debugApi = {
+  knockdown(e) { // Stolpern/Sturz ohne Schaden
+    if (!e || e.state !== 'fight' || e.down || e.getup) return false;
+    const dir = t1.set(e.pos.x - player.head.x, 0, e.pos.z - player.head.z).normalize().clone();
+    knockDown(e, dir, chestWorld(e, V()), 30); note(e, 'Zu Boden! (Test)');
+    return true;
+  },
+  stumble(e) {
+    if (!e || e.state !== 'fight' || e.down) return false;
+    e.stagger = 0.9; e.staggerDir = 1; e.act = null; e.queue.length = 0; note(e, 'stolpert (Test)');
+    return true;
+  },
+  disarm(e) { if (!e || !e.weapon || e.weaponId === 'fist' || e.weaponId === 'bow') return false; disarm(e, t1.set(Math.random() - 0.5, 0, Math.random() - 0.5).normalize()); return true; },
+  grab(e) { if (!e || e.state !== 'fight') return false; e.forceGrab = true; e.grabCool = 0; e.grabT = 0; return true; },
+  surrender(e) { if (!e || e.state !== 'fight') return false; surrender(e); return true; },
+  persona(e, pid) {
+    if (!e || !PERSONAS[pid]) return false;
+    const m = e.morale / Math.max(1, e.A.morale0);
+    e.A = makeAttrs(e.T, pid); e.persona = pid; e.morale = clamp(e.A.morale0 * m, 0, 100);
+    e.bal = Math.min(e.bal, e.A.balance);
+    return true;
+  },
+  setMorale(e, v) { if (!e) return false; e.morale = clamp(v, 0, 100); return true; }
+};
+// Zustand eines Gegners in Worten (Test-Anzeige)
+export function describe(e) {
+  const st = e.state === 'fight' ? (e.getup ? 'steht auf' : e.down ? (e.down.rag ? 'liegt (Ragdoll)' : 'liegt') : e.grab ? (e.grab.phase === 'hold' ? 'hält deine Waffe' : 'greift zu') : e.act ? 'greift an' : e.parry ? 'pariert' : e.recoil ? 'abgeprallt' : e.stagger > 0 ? 'taumelt' : e.rearm ? 'sucht Waffe' : e.token ? 'Angreifer' : 'lauert')
+    : { yield: 'ergeben', flee: 'flieht', dead: 'tot', approach: 'kommt', enter: 'kommt herein', climbIn: 'klettert', climbUp: 'klettert', exit: 'geht', rise: 'taucht auf' }[e.state] || e.state;
+  const phys = e.rag ? (e.rag.state === 'active' ? 'Ragdoll aktiv' : 'Ragdoll eingefroren') : e.getup ? 'Übergang Physik → Animation' : (e.state === 'dead' ? 'Sturz-Animation' : 'Animation');
+  return { st, phys, atk: e.dbg.atk, why: e.dbg.why, lever: e.dbg.lever || '', pat: patterns(e.know) };
 }

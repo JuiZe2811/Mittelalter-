@@ -226,6 +226,115 @@ Die Gegner sprechen sich ab und reagieren auf das, was du tust:
 - **Rückzug:** Schwer Verletzte ziehen sich hinter ihre Verbündeten zurück und kommen später wieder.
 - **Drohen:** Wartende brüllen mit erhobener Waffe oder schlagen auf ihren Schild.
 - Geübte Kämpfer wechseln ihre Grundstellung und kontern, wenn dein Hieb ins Leere geht.
+- **Nie gleichzeitig:** Zwei Angriffe beginnen nie im selben Moment, sondern mindestens gut 0,3 s versetzt.
+- **Um den Schild herum:** Hältst du einen Schild, wandern kluge Gegner zu deiner ungedeckten Seite.
+- **Kameraden decken:** Geht einer zu Boden, greift der nächste sofort an. Stirbt einer, sinkt die Moral der anderen; Berserker werden rasend.
+- **Reichweite:** Mit kurzer Waffe gegen deine lange drängen kluge Gegner hinein. Elite und Vorsichtige warten knapp außerhalb deiner Reichweite und treten erst zum Angriff hinein.
+
+### Persönlichkeiten
+
+Jeder Gegner hat zusätzlich zu seinem Typ eine Persönlichkeit, und innerhalb davon eigene Werte (±15 %). Die Persönlichkeit steht in der Test-Anzeige über dem Kopf.
+
+| Persönlichkeit | Verhalten |
+|---|---|
+| **Berserker** | rückt nah heran, greift am häufigsten an, liebt schwere Hiebe; kleine Treffer steckt er ohne Zucken weg. Pariert kaum. Ein schwerer Hieb ins Leere lässt ihn nach vorne stolpern – deine Gelegenheit. Ergibt sich nie, wird rasend, wenn ein Kamerad fällt. |
+| **Elite-Ritter** | hält den Abstand knapp außerhalb deiner Reichweite, pariert am besten, fintiert, setzt einen Hieb im Ausholen um, wenn du die Bahn deckst; nach einer Parade sticht er aus der Bindung nach. Lernt am schnellsten. |
+| **Vorsichtig** | hält mehr Abstand, blockt und pariert viel, lauert auf deine Fehlschläge und kontert; zieht sich nach Angriffen zurück. |
+| **Ängstlich** | zögert vor dem Angriff, weicht zurück; bei niedriger Moral lässt er vor Angst die Waffe fallen, ergibt sich oder flieht. |
+
+Typische Zuordnung: Axtkämpfer meist Berserker, Ritter meist Elite, Schildträger meist vorsichtig, Räuber oft ängstlich.
+
+### Was die Gegner von dir lernen
+
+Gegner wissen nur, was sie sehen:
+- woher deine Hiebe kommen (oben, tief, links, rechts, Stich),
+- womit du ihre Angriffe abwehrst (Schild, Klinge, Zurückweichen),
+- wie oft du daneben schlägst.
+
+Dieses Wissen kommt mit einer Verzögerung an (Reaktionszeit), wird manchmal falsch eingeordnet (je weniger klug, desto öfter) und verblasst nach etwa 20 Sekunden.
+
+Die Gegner nutzen es so:
+- **Vorbereitet:** Schlägst du immer gleich, parieren sie schneller und sicherer.
+- **Andere Ziele:** Was du oft abwehrst, greifen sie seltener an.
+- **Finten:** Wer viel abwehrt, wird öfter getäuscht.
+- **Stiche:** Weichst du oft zurück, stechen sie mehr.
+- **Konter:** Schlägst du oft daneben, lauern sie darauf.
+
+Die Stärke des Lernens hängt von der Persönlichkeit ab und lässt sich im Test-Menü regeln.
+
+### Paraden und Konter der Gegner
+
+- **Echte Parade:** Die Klinge des Gegners stellt sich quer zu deiner heranfliegenden Klinge, zwischen seine Brust und deinen Hieb.
+- **Nach der Parade:** Riposte, Stich aus der Bindung (Elite), Tritt (Berserker) oder Rückzug (Vorsichtige, Ängstliche).
+- **Keine Endlos-Abwehr:** Nach vier Abwehren hintereinander bricht der Gegner aus, entweder mit einem Gegenangriff oder mit Abstand.
+- **Angriff abbrechen:** Kommst du im Ausholen mit einem schnellen Hieb zuvor, brechen kluge Gegner ab und parieren.
+- **Kombo anpassen:** Wird ein Hieb oben abgewehrt, setzt ein lernfähiger Gegner sofort unten nach (und umgekehrt).
+
+### Waffe packen und entwaffnen
+
+**Gegner packen deine Waffe:** Ein Gegner mit freier Hand greift nach einer langsamen oder ruhenden Klinge in seiner Reichweite. Das passiert etwa nach einem Stich oder in der Bindung. Entwaffnete Gegner versuchen es öfter.
+
+- **Am Griff:** Er kontrolliert dein Handgelenk direkt.
+- **An der Klinge:**
+  - Mit Handschuh (Gambeson-, Ketten-, Plattenärmel) hält er sicher fest.
+  - Mit bloßer Hand hält er nur zaghaft. Ziehst du die Klinge ruckartig heraus, schneidet sie ihm die Hand.
+- **Widerstand:** Die Waffe bleibt an seiner Hand hängen, dein Controller bewegt sich frei weiter. Du spürst Vibration und siehst den Hinweis „Gepackt!“.
+- **Befreien:** Ruckartig zurückziehen oder die Klinge kräftig drehen.
+- **Kräftemessen:** Wer es gewinnt, hängt von Hebel und Kraft ab, nicht vom Zufall:
+  - Je weiter vorne er die Klinge fasst, desto mehr Hebel hat er gegen dein Handgelenk.
+  - Für ihn zählen außerdem seine Griffkraft und seine Ausdauer.
+  - Für dich zählen beidhändiger Griff, deine Ausdauer und langsames Gegenziehen.
+  - Gewinnt er, reißt er dir die Waffe aus der Hand. Ein Entwaffneter behält sie, sonst fällt sie zu Boden.
+
+**Du entwaffnest Gegner nach Hebel:**
+- **Hieb auf seine Waffe:** Je weiter vorne du sie triffst, desto größer das Drehmoment an seinem Handgelenk. Dagegen stehen Griffkraft, Ausdauer, Verletzung und beidhändiger Griff (nur ±12 % Streuung).
+- **Bindung (Winden):** Gewinnst du sie gegen ein schwaches oder müdes Handgelenk, drehst du ihm die Waffe heraus.
+- **Perfekte Parade:** Hat er nur noch wenig Griffkraft, verliert er die Waffe.
+
+### Moral: kämpfen, fliehen, sich ergeben
+
+Jeder Gegner hat eine Moral (0–100).
+
+| Senkt die Moral | Stärkt die Moral |
+|---|---|
+| Wunden (im Verhältnis zu seinen Lebenspunkten) | Verbündete in der Nähe |
+| verkrüppelte Gliedmaßen | |
+| entwaffnet werden | |
+| Stürze | |
+| fallende oder sich ergebende Kameraden | |
+| ein getöteter Ergebener | |
+
+- **Wirkung:** Wenig Moral macht vorsichtiger.
+- **Wird sie sehr niedrig, entscheidet die Persönlichkeit:**
+  - Ängstliche ergeben sich schnell.
+  - Vorsichtige fliehen eher.
+  - Elite-Ritter geben nur hilflos auf.
+  - Berserker nie.
+- **Flucht:** zur nächsten Tür oder zum nächsten Fenster, über die Laufwege.
+- **Ergeben:**
+  - Er lässt Waffe und Schild fallen, hebt die Hände, geht auf die Knie und bittet um Gnade (Sprachausgabe der Brille, Lautstärke „Stimmen“).
+  - Ergebene zählen nicht mehr als Angreifer.
+  - Im Test-Menü kannst du sie stehen lassen, wegschicken, wieder kämpfen lassen, entwaffnet lassen oder entfernen.
+
+### Stürze und Ragdoll-Physik
+
+**Fallen:** Stirbt ein Gegner oder geht er zu Boden, übernimmt die Physik den Körper. Es ist dieselbe Physik-Engine wie für Waffen und Möbel.
+- Der Körper besteht aus 11 Teilen (Kopf, Rumpf, Becken, Ober- und Unterarme, Ober- und Unterschenkel), verbunden mit begrenzten Gelenken. Das Knie beugt nur nach hinten.
+- Die Fallrichtung ergibt sich aus Trefferpunkt, Schlagrichtung, Wucht und seiner eigenen Bewegung.
+- Er fällt auf eingezeichnete Möbel und gegen Wände.
+
+**Liegen und Aufstehen** (wer den Sturz überlebt):
+1. liegt benommen und sieht sich um,
+2. steht über eine Hocke auf: ein fließender Übergang aus der liegenden Physik-Haltung in die Animation, ohne Sprung,
+3. kämpft weiter, oder sucht erst seine Waffe, oder flieht bzw. ergibt sich, je nach Moral.
+
+**Waffe im Sturz:** Ein leichter Sturz lässt sie in der Hand, ein harter schleudert sie weg (Wucht gegen Griffkraft). Sie fällt, rutscht und springt als echte Waffe. Du kannst sie aufheben, ein Gegner kann sie holen. Sie springt nie in die Hand zurück.
+
+**Leistung:**
+- Höchstens 2 Ragdolls rechnen gleichzeitig (einstellbar 1–4).
+- Liegt ein Körper still, wird er eingefroren: Er bleibt genau so liegen, kostet aber nichts mehr.
+- Schlägst du auf einen Gefallenen, wird er wieder lebendig und rutscht weg.
+- Ist das Budget voll, während alle noch fallen, fällt der nächste mit der einfachen Sturz-Animation.
 
 ### Trefferzonen und Folgen
 
@@ -316,6 +425,30 @@ Im Reiter **⚔ Kampf**:
 - **Schwierigkeit:** Leicht, Normal oder Schwer. Sie ändert Schaden, Reaktionsvermögen und Tempo der Gegner.
 - **Kampf-Texte:** kurze Einblendungen wie „Parade!“, „Bein verletzt“ oder „Rüstung hält“
 - **Blut:** an oder aus
+- **Ragdoll-Physik bei Stürzen:** an oder aus (aus = einfache Sturz-Animation)
+- **Ragdolls gleichzeitig:** 1–4 (Standard 2; mehr kostet auf der Quest Rechenzeit)
+- **Test-Menü (Entwickler):** schaltet das Test-Menü frei (Standard aus)
+
+## Test-Menü (Entwickler)
+
+Freischalten unter Einstellungen → ⚔ Kampf → „Test-Menü“. Öffnen über das Pause-Menü (**🛠 Test**), das Waffen-Menü oder am PC mit **T**. Das Spiel läuft dabei weiter. Die Knöpfe wirken auf den Gegner, auf den du am ehesten schaust.
+
+- **Gegner:** Typ und Persönlichkeit wählen. Dann als Kämpfer oder passiv erzeugen, oder die Persönlichkeit dem Ziel-Gegner geben.
+- **KI-Regler** (alle Gegner, 25–200 %): Schwierigkeit, Aggression, Reaktion, Lernfähigkeit, Moral, Verteidigung
+- **Physik:**
+  - Ragdoll an/aus
+  - wie viele gleichzeitig aktiv
+  - Stöße als rote Pfeile anzeigen
+- **Tests am Ziel-Gegner:** Zu Boden, Stolpern, Entwaffnen, Packt Waffe (greift nach deiner langsamen Klinge in Reichweite), Ergeben
+- **Ergebene:** wegschicken, wieder kämpfen, entwaffnet lassen, entfernen
+- **Anzeige über den Gegnern:**
+  - Persönlichkeit
+  - Zustand
+  - Moral, Ausdauer, Leben
+  - gewählter Hieb oder Entscheidung
+  - erkannte Muster
+  - Physik-Zustand, Hebel
+- **Oben im Menü:** aktive und eingefrorene Ragdolls, Bildrate, Rechenzeit der Gegner
 
 ## PC-Test ohne Brille
 
@@ -324,6 +457,7 @@ Im Reiter **⚔ Kampf**:
 | rechte Maus ziehen | umschauen |
 | WASD | gehen, auch auf den Tisch hinauf |
 | Q | Waffen-Menü |
+| T | Test-Menü (wenn in den Einstellungen freigeschaltet) |
 | 1–9, 0 | die ersten zehn Waffen im Waffen-Menü; alle über Q |
 | Linksklick | Hieb oder Schlag dorthin, wo das Fadenkreuz zeigt; Bogen: halten = spannen; Armbrust: erst spannen, dann schießen |
 | E | Stich |
@@ -336,7 +470,9 @@ Im Reiter **⚔ Kampf**:
 | Datei | Inhalt |
 |---|---|
 | `js/main.js` | Hände und Laser, Raum-Einrichtung, Waffen führen, Treffer und Blocks des Spielers, Menüs, Hauptschleife |
-| `js/enemies.js` | Kampf-KI: Angriffsbahnen, Paraden, Schildführung, Trefferzonen, Verletzungen, Flucht, Bogenschützen |
+| `js/enemies.js` | Kampf-KI: Angriffsbahnen, Paraden, Schildführung, Trefferzonen, Verletzungen, Moral, Ergeben, Flucht, Waffe packen, Stürze, Bogenschützen |
+| `js/ai.js` | Persönlichkeiten, Wahrnehmung und Lernen (Spielstil), Moral-Ereignisse |
+| `js/ragdoll.js` | Ragdoll-Physik (cannon-es): Körperteile, Gelenke, Budget, Einfrieren, Aufsteh-Übergang |
 | `js/fighter.js` | Gegner-Modelle und Daten: Typen, Rüstungen, Waffen, Angriffe |
 | `js/weapons.js` | Waffen des Spielers, Pfeilflug, Wurfdolch |
 | `js/geom.js` | Geometrie für Treffer: Abstand Strecke–Strecke, Strecke–Scheibe |
