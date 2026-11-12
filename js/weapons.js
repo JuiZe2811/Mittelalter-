@@ -1,21 +1,26 @@
 import * as THREE from 'three';
-import { hitTest, damageEnemy } from './enemies.js?v=6';
-import { roomOccluders } from './room.js?v=6';
-import { SFX } from './sfx.js?v=6';
-import { sparks, puff } from './effects.js?v=6';
+import { strikeTest, applyHit, boneOf } from './enemies.js?v=7';
+import { roomOccluders } from './room.js?v=7';
+import { SFX } from './sfx.js?v=7';
+import { sparks, puff } from './effects.js?v=7';
+import { makeArrowMesh, ARROW_LEN } from './arrow.js?v=7';
+export { makeArrowMesh };
 
 // =============================================================================
-// Waffen: Dolch, Langschwert, Schild, Bogen (+ Pfeile).
+// Waffen des Spielers: Dolch, Langschwert, Schild, Bogen (+ Pfeile).
 // Jede Waffe ist eine Gruppe mit dem Griff im Ursprung; nach vorne (Zeigerichtung des Controllers) = -Z.
+// Klingen haben eine Schneide (zeigt in der Hand nach „unten/vorne“, wie beim Hacken): Hiebe mit der
+// Schneide wirken voll, mit der flachen Seite nur halb. Stiche (Bewegung entlang der Klinge) zählen
+// eigens – sie gehen besser durch Rüstung.
 // =============================================================================
 export const WEAPON_ORDER = ['dagger', 'sword', 'bow', 'shield'];
 export const WEAPONS = {
-  dagger: { name: 'Dolch', icon: '🗡', melee: { dmg: 34, minSpeed: 1.3, base: 0.03, len: 0.22 }, throwable: true, mass: 0.4 },
-  sword: { name: 'Langschwert', icon: '⚔', melee: { dmg: 55, minSpeed: 1.6, base: 0.06, len: 0.88 }, mass: 1.4 },
+  dagger: { name: 'Dolch', icon: '🗡', melee: { slash: 14, thrust: 30, minSpeed: 1.3, base: 0.03, len: 0.22 }, throwable: true, mass: 0.4 },
+  sword: { name: 'Langschwert', icon: '⚔', melee: { slash: 40, thrust: 34, minSpeed: 1.6, base: 0.06, len: 0.88 }, twoHand: true, mass: 1.4 },
   bow: { name: 'Bogen', icon: '🏹', bow: true, mass: 0.8 },
   shield: { name: 'Schild', icon: '🛡', shield: { r: 0.3 }, mass: 2.5 }
 };
-const TILT = 0.55; // Klingen zeigen etwas nach oben (natürliche Handhaltung)
+export const TILT = 0.55; // Klingen zeigen etwas nach oben (natürliche Handhaltung)
 
 const steel = new THREE.MeshStandardMaterial({ color: 0xd6dae2, metalness: 0.55, roughness: 0.3, emissive: 0x1c1f24 });
 const darkSteel = new THREE.MeshStandardMaterial({ color: 0x6a6e75, metalness: 0.5, roughness: 0.45 });
@@ -24,16 +29,16 @@ const wood = new THREE.MeshStandardMaterial({ color: 0x7a5230, roughness: 0.8 })
 const darkWood = new THREE.MeshStandardMaterial({ color: 0x5a3a20, roughness: 0.85 });
 const brass = new THREE.MeshStandardMaterial({ color: 0xc09a4a, metalness: 0.5, roughness: 0.4 });
 const stringMat = new THREE.LineBasicMaterial({ color: 0xeee8d8 });
-const feather = new THREE.MeshStandardMaterial({ color: 0xb02a20, roughness: 0.9, side: THREE.DoubleSide });
 const m = (g, mat, x = 0, y = 0, z = 0) => { const o = new THREE.Mesh(g, mat); o.position.set(x, y, z); o.castShadow = true; return o; };
 
-// Klinge entlang -Z: flacher Keil mit Spitze
+// Klinge entlang -Z, Schneiden bei ±Y (hochkant in der Hand), flache Seiten bei ±X
 function bladeGeo(len, w, thick) {
   const s = new THREE.Shape();
   s.moveTo(-w / 2, 0); s.lineTo(w / 2, 0); s.lineTo(w / 2 * 0.8, len * 0.85); s.lineTo(0, len); s.lineTo(-w / 2 * 0.8, len * 0.85); s.closePath();
   const g = new THREE.ExtrudeGeometry(s, { depth: thick, bevelEnabled: true, bevelThickness: thick * 0.4, bevelSize: w * 0.12, bevelSegments: 1 });
   g.translate(0, 0, -thick / 2);
-  g.rotateX(-Math.PI / 2); // +Y → -Z
+  g.rotateX(-Math.PI / 2); // Länge: +Y → -Z
+  g.rotateZ(Math.PI / 2);  // Breite: X → Y (Schneide hochkant)
   return g;
 }
 function bladed(id, { len, w, thick, guardW, grip, pommel }) {
@@ -41,24 +46,23 @@ function bladed(id, { len, w, thick, guardW, grip, pommel }) {
   const model = new THREE.Group();
   model.rotation.x = TILT;
   root.add(model);
-  const blade = m(bladeGeo(len, w, thick), steel, 0, 0, -0.03);
-  model.add(blade);
-  model.add(m(new THREE.BoxGeometry(guardW, 0.022, 0.03), brass, 0, 0, -0.025));
-  const g = m(new THREE.CylinderGeometry(0.016, 0.017, grip, 10).rotateX(Math.PI / 2), leather, 0, 0, grip / 2 - 0.02);
-  model.add(g);
+  model.add(m(bladeGeo(len, w, thick), steel, 0, 0, -0.03));
+  model.add(m(new THREE.BoxGeometry(0.03, guardW, 0.022), brass, 0, 0, -0.025));
+  model.add(m(new THREE.CylinderGeometry(0.016, 0.017, grip, 10).rotateX(Math.PI / 2), leather, 0, 0, grip / 2 - 0.02));
   model.add(m(new THREE.SphereGeometry(pommel, 10, 8), brass, 0, 0, grip - 0.01));
-  // Messpunkte der Klinge (lokal in root): Ansatz und Spitze
+  // Messpunkte (lokal in root): Klingenansatz, Spitze, Schneidenrichtung, Platz für die zweite Hand
   const base = new THREE.Vector3(0, 0, -0.03 - WEAPONS[id].melee.base).applyEuler(model.rotation);
   const tip = new THREE.Vector3(0, 0, -0.03 - len).applyEuler(model.rotation);
-  return { root, model, base, tip };
+  const edge = new THREE.Vector3(0, 1, 0).applyEuler(model.rotation);
+  const grip2 = new THREE.Vector3(0, 0, grip - 0.06).applyEuler(model.rotation);
+  return { root, model, base, tip, edge, grip2 };
 }
 function buildShield() {
   const root = new THREE.Group();
   const model = new THREE.Group();
   root.add(model);
   // runder Holzschild mit Eisenrand und Buckel, Vorderseite zeigt nach -Z
-  const face = m(new THREE.CylinderGeometry(0.3, 0.3, 0.025, 32).rotateX(Math.PI / 2), wood, 0, 0, -0.07);
-  model.add(face);
+  model.add(m(new THREE.CylinderGeometry(0.3, 0.3, 0.025, 32).rotateX(Math.PI / 2), wood, 0, 0, -0.07));
   for (let i = -2; i <= 2; i++) model.add(m(new THREE.BoxGeometry(0.004, 0.58 - Math.abs(i) * 0.08, 0.004), darkWood, i * 0.11, 0, -0.084)); // Bretterfugen
   model.add(m(new THREE.TorusGeometry(0.3, 0.012, 6, 40), darkSteel, 0, 0, -0.07));
   model.add(m(new THREE.SphereGeometry(0.07, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2).rotateX(-Math.PI / 2), darkSteel, 0, 0, -0.083));
@@ -84,28 +88,18 @@ function buildBow() {
   model.add(nocked);
   return { root, model, string: str, tipA, tipB, nock: new THREE.Vector3(0, 0, STRING_Z), grip: new THREE.Vector3(0, 0, -0.07), nocked };
 }
-// Pfeil: Spitze bei -Z, Länge 0.75
-const ARROW_LEN = 0.75;
-export function makeArrowMesh() {
-  const g = new THREE.Group();
-  g.add(m(new THREE.CylinderGeometry(0.0045, 0.0045, ARROW_LEN, 6).rotateX(Math.PI / 2), wood, 0, 0, -ARROW_LEN / 2));
-  g.add(m(new THREE.ConeGeometry(0.012, 0.05, 6).rotateX(-Math.PI / 2), darkSteel, 0, 0, -ARROW_LEN - 0.02));
-  for (let i = 0; i < 3; i++) {
-    const f = m(new THREE.PlaneGeometry(0.02, 0.09), feather, 0, 0, -0.06);
-    f.rotation.set(Math.PI / 2, i * Math.PI * 2 / 3, 0);
-    f.position.set(Math.cos(i * 2.09) * 0.01, Math.sin(i * 2.09) * 0.01, -0.06);
-    g.add(f);
-  }
-  return g;
-}
 
 export function createWeapon(id) {
   const def = WEAPONS[id];
   const parts = id === 'dagger' ? bladed(id, { len: 0.22, w: 0.032, thick: 0.006, guardW: 0.07, grip: 0.1, pommel: 0.016 })
-    : id === 'sword' ? bladed(id, { len: 0.88, w: 0.05, thick: 0.008, guardW: 0.2, grip: 0.22, pommel: 0.024 })
+    : id === 'sword' ? bladed(id, { len: 0.88, w: 0.05, thick: 0.008, guardW: 0.2, grip: 0.24, pommel: 0.024 })
     : id === 'bow' ? buildBow() : buildShield();
   parts.root.traverse(o => { if (o.isMesh) o.castShadow = true; });
-  return { id, def, ...parts, holder: null, phys: null, prevTip: null, lastHit: new Map(), draw: 0 };
+  return {
+    id, def, ...parts, holder: null, second: null, twoHand: false, phys: null, draw: 0,
+    prevTip: null, prevBase: null, tipVel: new THREE.Vector3(), tipSpeed: 0, spentUntil: 0, // Nahkampf
+    prevC: null, cVel: new THREE.Vector3(), bashUntil: 0, stuck: []                         // Schild
+  };
 }
 
 // Bogen-Sehne zeichnen: hand = Position der Zughand (Welt) oder null (entspannt)
@@ -124,48 +118,61 @@ export function setBowString(w, handWorld) {
 }
 
 // ---- fliegende Pfeile und geworfene Dolche ----------------------------------------
-const flying = []; // { obj, vel, spin, kind, dmg, life, stuck, onDone }
+const flying = []; // { obj, vel, kind, power, life, stuck, onDone }
 const raycaster = new THREE.Raycaster();
-let scene = null, onHit = () => {};
-export function initWeapons(s, hitCallback) { scene = s; onHit = hitCallback; }
+let scene = null, onHit = () => {}, onBlocked = () => {};
+// hitCallback(hit, result, info) bei Treffern · blockedCallback(hit) wenn ein Schild/eine Parade den Pfeil abfängt
+export function initWeapons(s, hitCallback, blockedCallback) { scene = s; onHit = hitCallback; if (blockedCallback) onBlocked = blockedCallback; }
 export function shootArrow(from, dir, speed) {
-  const obj = makeArrowMesh();
+  const obj = makeArrowMesh(0);
   obj.position.copy(from);
   scene.add(obj);
-  flying.push({ obj, vel: dir.clone().normalize().multiplyScalar(speed), kind: 'arrow', dmg: 25 + speed * 2.2, life: 6, stuck: false });
+  flying.push({ obj, vel: dir.clone().normalize().multiplyScalar(speed), kind: 'arrow', power: 15 + speed * 1.3, life: 6, stuck: false });
   SFX.whoosh();
 }
-// Dolch fliegt mit der Spitze voran; onDone(w, hitEnemy) wenn er landet
+// Dolch fliegt mit der Spitze voran; onDone(w, restgeschwindigkeit) wenn er landet
 export function throwBlade(w, vel, onDone) {
   scene.attach(w.root);
-  flying.push({ obj: w.root, w, vel: vel.clone(), kind: 'blade', dmg: w.def.melee.dmg * 1.8, life: 3, stuck: false, onDone });
+  flying.push({ obj: w.root, w, vel: vel.clone(), kind: 'blade', power: w.def.melee.thrust * 1.25, life: 3, stuck: false, onDone });
   SFX.whoosh();
 }
-const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3(), FWD = new THREE.Vector3(0, 0, -1);
+const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3(), FWD = new THREE.Vector3(0, 0, -1), XA = new THREE.Vector3(1, 0, 0);
 export function updateFlying(dt) {
   for (let i = flying.length - 1; i >= 0; i--) {
     const f = flying[i];
     f.life -= dt;
     if (f.stuck) { // steckender Pfeil verschwindet nach einer Weile
-      if (f.life <= 0) { scene.remove(f.obj); flying.splice(i, 1); }
+      if (f.life <= 0) { if (f.obj.parent) f.obj.parent.remove(f.obj); flying.splice(i, 1); }
       continue;
     }
     f.vel.y -= 9.81 * dt * (f.kind === 'arrow' ? 0.5 : 1);
     const a = tmpA.copy(f.obj.position);
     const b = tmpB.copy(a).addScaledVector(f.vel, dt);
+    const dir = f.vel.clone().normalize();
     // Ausrichtung entlang der Flugbahn
-    const q = new THREE.Quaternion().setFromUnitVectors(FWD, f.vel.clone().normalize());
+    const q = new THREE.Quaternion().setFromUnitVectors(FWD, dir);
     if (f.kind === 'arrow') f.obj.quaternion.copy(q);
-    else f.obj.quaternion.copy(q).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -TILT));
+    else f.obj.quaternion.copy(q).multiply(new THREE.Quaternion().setFromAxisAngle(XA, -TILT));
     const tipOff = f.kind === 'arrow' ? ARROW_LEN : 0.2;
-    const tipA = a.clone().addScaledVector(f.vel.clone().normalize(), tipOff), tipB = b.clone().addScaledVector(f.vel.clone().normalize(), tipOff);
-    // Skelett getroffen?
-    const h = hitTest(tipA, tipB, 0.02);
+    const tipA = a.clone().addScaledVector(dir, tipOff), tipB = b.clone().addScaledVector(dir, tipOff);
+    // Gegner getroffen? (Schild oder Parade können den Pfeil abfangen)
+    const h = strikeTest(tipA, tipB, 0.02, true);
+    if (h && h.kind !== 'body') {
+      onBlocked(h);
+      if (f.kind === 'arrow' && h.kind === 'shield' && h.e.shield) { // bleibt im Schild stecken
+        f.obj.position.copy(h.point).addScaledVector(dir, -ARROW_LEN + 0.07);
+        h.e.shield.attach(f.obj); f.stuck = true; f.life = 12;
+      } else if (f.kind === 'arrow') { scene.remove(f.obj); flying.splice(i, 1); }
+      else { flying.splice(i, 1); f.onDone && f.onDone(f.w, f.vel.clone().multiplyScalar(-0.15)); }
+      continue;
+    }
     if (h) {
-      const r = damageEnemy(h.e, f.dmg, h.zone, h.point, f.vel.clone().setY(0).normalize(), 0.6);
-      onHit(h, r, f.kind);
-      if (f.kind === 'arrow') { scene.remove(f.obj); flying.splice(i, 1); }
-      else { flying.splice(i, 1); f.onDone && f.onDone(f.w, f.vel.clone().multiplyScalar(0.15)); }
+      const r = applyHit(h.e, h.zone, { type: 'thrust', power: f.power, dir: dir.clone(), point: h.point, knock: 0.6 });
+      onHit(h, r, { type: 'thrust', source: f.kind });
+      if (f.kind === 'arrow') { // Pfeil bleibt im Körper stecken
+        f.obj.position.copy(h.point).addScaledVector(dir, -ARROW_LEN + 0.14);
+        boneOf(h.e, h.zone).attach(f.obj); f.stuck = true; f.life = 25;
+      } else { flying.splice(i, 1); f.onDone && f.onDone(f.w, f.vel.clone().multiplyScalar(0.12)); }
       continue;
     }
     // Wand/Möbel/Boden getroffen? → stecken bleiben (Pfeil) bzw. herunterfallen (Dolch)
@@ -185,5 +192,5 @@ export function updateFlying(dt) {
   }
 }
 export function clearFlying() {
-  for (const f of flying.splice(0)) { if (f.kind === 'arrow') scene.remove(f.obj); else if (f.onDone) f.onDone(f.w, new THREE.Vector3()); }
+  for (const f of flying.splice(0)) { if (f.kind === 'arrow') { if (f.obj.parent) f.obj.parent.remove(f.obj); } else if (f.onDone) f.onDone(f.w, new THREE.Vector3()); }
 }

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { room, surfacesOf } from './room.js?v=6';
+import { room, surfacesOf } from './room.js?v=7';
 
 // =============================================================================
 // Laufwege: Raster über dem eingezeichneten Raum + A*-Wegsuche.

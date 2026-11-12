@@ -1,22 +1,22 @@
 import * as THREE from 'three';
-import { VERSION } from './version.js?v=6';
+import { VERSION } from './version.js?v=7';
 import { ARButton } from 'three/addons/webxr/ARButton.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { makePanel, panelBg, roundRect } from './util.js?v=6';
-import { SFX, SFX_PLAYER, ensureAudio, setListener, setVolumes, setAudioPaused } from './sfx.js?v=6';
-import { stepPhysics, addDynamic, removeDynamic, localBoxOf } from './physics.js?v=6';
-import { initEnemies, spawnEnemy, updateEnemies, clearEnemies, prepareNav, aliveCount, enemies, hitTest, damageEnemy, bounceOff } from './enemies.js?v=6';
-import { groundAt } from './nav.js?v=6';
-import { WEAPON_ORDER, WEAPONS, createWeapon, setBowString, initWeapons, shootArrow, throwBlade, updateFlying, clearFlying } from './weapons.js?v=6';
-import { room, addWall, addBox, makeWall, makeBox, rotateBox, removeSurface, clearRoom, setEditMode, suggestYaw, surfacesOf, importDetectedPlanes, saveRoom, loadRoom, hasSavedRoom, surfaceName, serializeRoom, deserializeRoom, roomSlots, saveRoomSlot, loadRoomSlot, addOpening, makeOpening, roomOccluders, setAtmosphere, closeRoomGaps, closeRoom, openWallEnds } from './room.js?v=6';
-import { initEffects, headRef, floatingText, updateEffects, updateDebris, fx, clearDebris, sparks } from './effects.js?v=6';
+import { makePanel, panelBg, roundRect } from './util.js?v=7';
+import { SFX, SFX_PLAYER, ensureAudio, setListener, setVolumes, setAudioPaused } from './sfx.js?v=7';
+import { stepPhysics, addDynamic, removeDynamic, localBoxOf } from './physics.js?v=7';
+import { initEnemies, spawnEnemy, updateEnemies, clearEnemies, prepareNav, aliveCount, enemies, strikeTest, applyHit, shoveEnemy, player, opts as combatOpts, pickType, ENEMY_TYPES, TYPE_ORDER } from './enemies.js?v=7';
+import { groundAt } from './nav.js?v=7';
+import { WEAPON_ORDER, WEAPONS, createWeapon, setBowString, initWeapons, shootArrow, throwBlade, updateFlying, clearFlying } from './weapons.js?v=7';
+import { room, addWall, addBox, makeWall, makeBox, rotateBox, removeSurface, clearRoom, setEditMode, suggestYaw, surfacesOf, importDetectedPlanes, saveRoom, loadRoom, hasSavedRoom, surfaceName, serializeRoom, deserializeRoom, roomSlots, saveRoomSlot, loadRoomSlot, addOpening, makeOpening, roomOccluders, setAtmosphere, closeRoomGaps, closeRoom, openWallEnds } from './room.js?v=7';
+import { initEffects, headRef, floatingText, updateEffects, updateDebris, fx, clearDebris, sparks } from './effects.js?v=7';
 const hyp = (a, b, c = 0) => Math.sqrt(a * a + b * b + c * c); // schneller als Math.hypot und ohne Speicher-Müll
 
 // =============================================================================
 // Grundgerüst – Burg-Abwehr (Neuanfang)
 // Enthalten: Raum-Einrichtung (Wände, Türen, Fenster, Möbel, Bodenhöhe, Räume speichern/laden,
-// Ausrichten, Quest-Raum), Menü, Einstellungen, Pause, Skelette (kommen durch Türen & Fenster,
-// klettern auf Bett/Tisch) und Waffen: Dolch, Langschwert, Schild, Bogen.
+// Ausrichten, Quest-Raum), Menü, Einstellungen, Pause, Gegner (kommen durch Türen & Fenster,
+// klettern auf Bett/Tisch, kämpfen mit echten Waffenbahnen) und Waffen: Dolch, Langschwert, Schild, Bogen.
 // =============================================================================
 const HOLD_OFFSET = new THREE.Matrix4().makeTranslation(0, -0.045, 0.015); // Handmitte relativ zum Controller
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -36,8 +36,8 @@ const envTex = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(
 scene.environment = envTex;
 scene.add(room.group);
 initEffects(scene);
-initEnemies(scene, (e) => enemyStrike(e));
-initWeapons(scene, (h, r) => onEnemyHit(h, r));
+initEnemies(scene);
+initWeapons(scene, (h, r, info) => onEnemyHit(h, r, info), (h) => enemyBlocked(h, null));
 
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 200);
 camera.position.set(0, 1.6, 0);
@@ -124,7 +124,7 @@ const hands = [0, 1].map(i => {
   const h = {
     i, ray, src: null, handedness: i === 0 ? 'left' : 'right', btn: {}, prev: {}, stickX: 0, stickY: 0,
     point: new THREE.Vector3(), tip: new THREE.Vector3(), quat: new THREE.Quaternion(), uiHover: null,
-    held: null, drawing: null, pull: null, hist: [], vel: new THREE.Vector3(), angVel: new THREE.Vector3()
+    held: null, drawing: null, pull: null, grip2: null, hist: [], vel: new THREE.Vector3(), angVel: new THREE.Vector3()
   };
   ray.addEventListener('connected', (e) => { h.src = e.data; h.handedness = e.data.handedness; });
   ray.addEventListener('disconnected', () => { releaseHand(h); h.src = null; });
@@ -201,7 +201,7 @@ function updateHandsXR(dt) {
   for (const h of hands) {
     if (!h.src) { h.pointer.visible = false; continue; }
     h.tipMarker.visible = state === 'setup' && setup.tool === 'floor';
-    const free = !h.held && !h.drawing && !h.pull;
+    const free = !h.held && !h.drawing && !h.pull && !h.grip2;
     // Zeigestrahl (im Einrichtungsmodus als Laser bis zum Boden / zur Wand)
     let pt = null;
     if ((free || weaponPanel.visible) && !(setup.drag && setup.drag.src === h)) pt = pointerTarget(h);
@@ -227,7 +227,9 @@ function updateHandsXR(dt) {
     if (down(h, 'squeeze') && free && state !== 'setup') {
       const ow = otherHand(h).held;
       if (ow && ow.def.bow && h.point.distanceTo(ow.root.localToWorld(ow.nock.clone())) < 0.25) { h.drawing = ow; ow.draw = 0; SFX.click(500, 0.3, 0.05); pulse(h, 0.4, 30); }
-      else {
+      else if (ow && ow.def.twoHand && !ow.second && h.point.distanceTo(ow.root.localToWorld(ow.grip2.clone())) < 0.17) { // Schwert beidhändig fassen
+        ow.second = h; h.grip2 = ow; SFX.grab(); pulse(h, 0.5, 40); pulse(otherHand(h), 0.3, 30);
+      } else {
         const w = weaponNear(h);
         if (w) takeWeapon(w, h);
         else if (pt && pt.kind === 'weapon') { h.pull = { w: pt.w }; SFX.whoosh(); }
@@ -363,9 +365,13 @@ const SETTINGS_TABS = {
     { key: 'announcer', label: 'Ansager', opts: ten() },
     { key: 'announcerVoice', label: 'Ansager-Stimme', opts: [['demon', 'Dämon'], ['deep', 'Tief'], ['normal', 'Normal'], ['high', 'Hoch']] }
   ] },
+  kampf: { label: '⚔ Kampf', items: [
+    { key: 'difficulty', label: 'Schwierigkeit', opts: [['easy', 'Leicht'], ['normal', 'Normal'], ['hard', 'Schwer']] },
+    { key: 'popups', label: 'Kampf-Texte (Parade!, Bein verletzt …)', opts: onOff },
+    { key: 'blood', label: 'Blut', opts: [[0, 'Aus'], [1, 'An']] }
+  ] },
   bedienung: { label: '✊ Bedienung', items: [
-    { key: 'haptics', label: 'Vibration', opts: [[0, 'Aus'], [0.5, 'Schwach'], [1, 'Normal'], [1.5, 'Stark']] },
-    { key: 'popups', label: 'Text-Einblendungen', opts: onOff }
+    { key: 'haptics', label: 'Vibration', opts: [[0, 'Aus'], [0.5, 'Schwach'], [1, 'Normal'], [1.5, 'Stark']] }
   ] },
   grafik: { label: '✨ Grafik', items: [
     { key: 'quality', label: 'Leistung', opts: [['quality', 'Schön'], ['balanced', 'Ausgewogen'], ['fast', 'Flüssig']] },
@@ -378,7 +384,7 @@ const SETTINGS_TABS = {
 };
 const SETTINGS_DEFAULT = {
   master: 9, sfx: 10, music: 6, voices: 10, announcer: 10, announcerVoice: 'deep',
-  haptics: 1, popups: true,
+  haptics: 1, popups: true, difficulty: 'normal', blood: 1,
   quality: 'balanced', shadows: true, particles: 1, dust: true, frameRate: 90, autoPerf: true
 };
 const settings = Object.assign({}, SETTINGS_DEFAULT, { shadows: shadowsOn }, load('burg-einstellungen', {}));
@@ -388,6 +394,10 @@ function applySettings() {
   voiceOn = settings.announcer > 0;
   fx.particles = settings.particles;
   fx.popups = settings.popups;
+  fx.blood = settings.blood;
+  // Schwierigkeit: Schaden, Reaktionsvermögen (Parieren, Schild, Finten) und Tempo der Gegner
+  const D = { easy: { dmg: 0.6, react: 0.7, speed: 0.88 }, normal: { dmg: 1, react: 1, speed: 1 }, hard: { dmg: 1.4, react: 1.25, speed: 1.1 } }[settings.difficulty] || { dmg: 1, react: 1, speed: 1 };
+  Object.assign(combatOpts, D, { texts: settings.popups });
   if (shadowsOn !== settings.shadows) setShadows(settings.shadows);
   dust.visible = settings.dust;
   applyQuality();
@@ -1147,6 +1157,8 @@ function giveWeapon(id, h = null) {
   return w;
 }
 function freeWeapon(w) { // aus Hand/Physik/Flug lösen
+  if (w.second) { w.second.grip2 = null; w.second = null; }
+  w.twoHand = false; w.prevTip = w.prevBase = w.prevC = null; w.tipSpeed = 0;
   if (w.holder) { const h = w.holder; if (h.held === w) h.held = null; if (h.drawing && h.drawing === w) h.drawing = null; w.holder = null; }
   for (const h of hands) { if (h.drawing === w) h.drawing = null; if (h.pull && h.pull.w === w) h.pull = null; }
   if (w.phys) { removeDynamic(w.phys); w.phys = null; }
@@ -1193,11 +1205,9 @@ function takeWeapon(w, h) {
   w.floating = false;
   w.holder = h;
   h.held = w;
-  w.prevTip = null;
   SFX.grab();
   pulse(h, 0.5, 40);
 }
-const heldShield = () => arsenal.find(w => w.def.shield && (w.holder || w.desk));
 function weaponNear(h) {
   let best = null, bd = 0.1;
   for (const w of arsenal) {
@@ -1209,6 +1219,7 @@ function weaponNear(h) {
 }
 function releaseHand(h) {
   h.pull = null;
+  if (h.grip2) { h.grip2.second = null; h.grip2.twoHand = false; h.grip2 = null; return; } // zweite Hand lässt den Schwertgriff los
   if (h.drawing) { bowRelease(h); return; }
   const w = h.held;
   if (!w) return;
@@ -1225,32 +1236,92 @@ function releaseHand(h) {
   makeLooseW(w, h.vel.clone(), h.angVel.clone());
 }
 
-// ---- Nahkampf: Klinge muss wirklich geschwungen werden -------------------------------
-function meleeUpdate(w, dt, h) {
+// ---- Nahkampf: echte Klingenbahn. Hieb (Schneide voran) oder Stich (entlang der Klinge) ----------
+const _mb = new THREE.Vector3(), _mt = new THREE.Vector3();
+const clamp = THREE.MathUtils.clamp;
+// Klingenpunkte und Geschwindigkeit aktualisieren (auch für Paraden gegen Angriffe der Gegner)
+function bladeState(w, dt) {
   const base = w.root.localToWorld(w.base.clone()), tip = w.root.localToWorld(w.tip.clone());
-  const prev = w.prevTip;
-  w.prevTip = tip.clone();
-  if (!prev || dt <= 0) return;
-  const speed = tip.distanceTo(prev) / dt;
-  if (speed < w.def.melee.minSpeed) return;
-  const hit = hitTest(base, tip, 0.01) || hitTest(prev, tip, 0.01);
-  if (!hit) return;
-  const last = w.lastHit.get(hit.e) || -9;
-  if (elapsed - last < 0.45) return; // pro Schwung jedes Skelett nur einmal
-  w.lastHit.set(hit.e, elapsed);
-  const dmg = w.def.melee.dmg * THREE.MathUtils.clamp(speed / 3.5, 0.5, 1.8);
-  const dir = tip.clone().sub(prev).setY(0).normalize();
-  const r = damageEnemy(hit.e, dmg, hit.zone, hit.point, dir, w.id === 'sword' ? 1.2 : 0.6);
-  onEnemyHit(hit, r, w.id);
-  if (h) pulse(h, r.killed ? 1 : 0.7, r.killed ? 90 : 50);
+  const pb = w.prevBase, pt = w.prevTip;
+  w.prevBase = base; w.prevTip = tip;
+  if (!pt || dt <= 0) { w.tipSpeed = 0; w.tipVel.set(0, 0, 0); return null; }
+  w.tipVel.copy(tip).sub(pt).divideScalar(dt);
+  w.tipSpeed = w.tipVel.length();
+  return { base, tip, pb, pt };
 }
-// Treffer-Rückmeldung (Nahkampf, Pfeil, Wurf)
-function onEnemyHit(hit, r, kind) {
-  SFX.thunk();
-  SFX.marker && SFX.marker(r.killed, hit.zone === 'head');
-  if (r.killed) {
-    kills++;
-    floatingText(hit.zone === 'head' ? '💀 Kopftreffer!' : '💀', hit.point.clone().add(new THREE.Vector3(0, 0.25, 0)), hit.zone === 'head' ? '#ffd36a' : '#ffffff');
+function meleeUpdate(w, dt, h) {
+  const s = bladeState(w, dt);
+  if (!s || state === 'setup' || elapsed < w.spentUntil) return;
+  if (w.tipSpeed > 28) return; // Tracking-Sprung (Controller kurz verloren): kein Hieb
+  const M = w.def.melee;
+  const axis = s.tip.clone().sub(s.base).normalize();
+  const along = w.tipVel.dot(axis), baseAlong = s.base.clone().sub(s.pb).divideScalar(dt).dot(axis);
+  const thrust = along > 0.9 && baseAlong > 0.6 && along > w.tipSpeed * 0.72; // Bewegung entlang der Klinge = Stich
+  if (!thrust && w.tipSpeed < M.minSpeed) return;                              // langsames Hineinhalten zählt nicht
+  // Bahn seit dem letzten Bild in kleinen Schritten prüfen (schnelle Hiebe überspringen sonst Schild/Körper)
+  const n = clamp(Math.ceil(s.tip.distanceTo(s.pt) / 0.05), 1, 8);
+  let hit = null;
+  for (let i = 1; i <= n && !hit; i++) hit = strikeTest(_mb.lerpVectors(s.pb, s.base, i / n), _mt.lerpVectors(s.pt, s.tip, i / n), 0.012);
+  if (!hit) return;
+  w.spentUntil = elapsed + 0.38; // der Schwung ist verbraucht
+  if (hit.kind !== 'body') { enemyBlocked(hit, h); return; }
+  const two = w.twoHand ? 1 : 0;
+  let type, power, flat = false;
+  if (thrust) { type = 'thrust'; power = M.thrust * clamp(along / 1.8, 0.6, 1.6) * (1 + 0.2 * two); }
+  else {
+    type = 'slash';
+    const perp = w.tipVel.clone().addScaledVector(axis, -along);
+    const edge = w.edge.clone().transformDirection(w.root.matrixWorld);
+    const align = perp.lengthSq() > 1e-6 ? Math.abs(perp.normalize().dot(edge)) : 1; // 1 = Schneide voran, 0 = flache Seite
+    flat = align < 0.45;
+    power = M.slash * clamp(w.tipSpeed / 3.2, 0.45, 1.7) * (0.5 + 0.5 * align) * (1 + 0.3 * two);
+  }
+  const r = applyHit(hit.e, hit.zone, { type, power, dir: w.tipVel.clone().normalize(), point: hit.point, knock: w.id === 'sword' ? 1.2 : 0.5 });
+  onEnemyHit(hit, r, { type, flat });
+  if (h) pulse(h, r.killed ? 1 : r.armor ? 0.9 : 0.7, r.killed ? 100 : 55);
+  if (w.second) pulse(w.second, 0.6, 50);
+}
+// Der Gegner hat mit Schild oder Klinge abgefangen
+function enemyBlocked(hit, h) {
+  SFX.clang();
+  sparks(hit.point, tmpV.subVectors(headPos, hit.point).normalize(), 8);
+  if (h) pulse(h, 1, 80);
+  if (settings.popups) floatingText(hit.kind === 'shield' ? 'Schild!' : 'Pariert!', hit.point.clone().add(new THREE.Vector3(0, 0.2, 0)), '#cfd8e3');
+  if (hit.e.cool > 0.25 && Math.random() < 0.6) hit.e.cool = 0.25; // er nutzt die Gelegenheit zum Gegenangriff
+}
+// Treffer-Rückmeldung (Nahkampf, Pfeil, Wurf, Schildstoß)
+function onEnemyHit(hit, r, info = {}) {
+  if (r.armor) SFX.clang(); else SFX.thunk();
+  SFX.marker(r.killed, hit.zone === 'head');
+  if (!settings.popups || r.killed || r.notes.length) return;
+  const at = hit.point.clone().add(new THREE.Vector3(0, 0.2, 0));
+  if (r.armor) floatingText('Rüstung hält', at, '#cfd8e3');
+  else if (info.flat) floatingText('Flache Seite', at, '#cfd8e3');
+}
+// ---- Schild des Spielers: Schildstoß (schnell nach vorne gestoßen) ---------------------------------
+function shieldUpdate(w, dt, h) {
+  const c = w.root.localToWorld(w.center.clone());
+  if (w.prevC && dt > 0) w.cVel.copy(c).sub(w.prevC).divideScalar(dt);
+  w.prevC = c;
+  if (state === 'setup' || elapsed < w.bashUntil) return;
+  const n = w.normal.clone().transformDirection(w.root.matrixWorld);
+  const v = w.cVel.dot(n);
+  if (v < 1.6) return;
+  for (const e of enemies) {
+    if (e.state === 'dead') continue;
+    const chest = e.torso.localToWorld(new THREE.Vector3(0, 0.3, 0));
+    if (chest.distanceTo(c) > 0.55 || n.dot(tmpV3.subVectors(chest, c)) < 0.05) continue;
+    w.bashUntil = elapsed + 0.6;
+    if (e.shield && e.shield.getWorldPosition(tmpV3).distanceTo(c) < 0.5) { // Schild auf Schild
+      SFX.clang(); e.stagger = Math.max(e.stagger, 0.35);
+      sparks(c, n, 6);
+    } else {
+      const r = shoveEnemy(e, n.clone().setY(0).normalize(), clamp(v / 2, 0.8, 1.6), chest);
+      SFX.thud(0.6);
+      onEnemyHit({ e, zone: 'torso', point: chest }, r, { type: 'blunt' });
+    }
+    if (h) pulse(h, 1, 90);
+    break;
   }
 }
 
@@ -1259,7 +1330,7 @@ function bowUpdate(h) {
   const w = h.drawing;
   const gripW = w.root.localToWorld(w.grip.clone());
   const dist = h.point.distanceTo(gripW);
-  const draw = THREE.MathUtils.clamp((dist - 0.12) / 0.5, 0, 1);
+  const draw = clamp((dist - 0.12) / 0.5, 0, 1);
   if (Math.floor(draw * 8) !== Math.floor(w.draw * 8) && draw > w.draw) { pulse(h, 0.15 + draw * 0.3, 15); SFX.click(300 + draw * 400, 0.12, 0.02); }
   w.draw = draw;
   setBowString(w, h.point);
@@ -1278,66 +1349,124 @@ function bowRelease(h) {
   setBowString(w, null);
 }
 
-// ---- Spieler: Leben, Treffer, Schild-Block ------------------------------------------
+// ---- Spieler: Leben, Treffer, Block-Rückmeldung ----------------------------------------------
 let playerHp = 100, regenT = 0, hurtFlash = 0, kills = 0, roundT = 0, lastResult = null, heartT = 0;
 const hurtMesh = new THREE.Mesh(new THREE.SphereGeometry(0.25, 16, 12),
   new THREE.MeshBasicMaterial({ color: 0xaa0000, transparent: true, opacity: 0, side: THREE.BackSide, depthTest: false, depthWrite: false, toneMapped: false }));
 hurtMesh.renderOrder = 2000;
 hurtMesh.visible = false;
 camera.add(hurtMesh);
+// Richtungsanzeige: roter Bogen zeigt, von wo der Treffer kam
+const dirIndicator = (() => {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(128, 128, 80, 128, 128, 126);
+  g.addColorStop(0, 'rgba(255,0,0,0)'); g.addColorStop(0.6, 'rgba(255,20,20,0.9)'); g.addColorStop(1, 'rgba(255,0,0,0)');
+  ctx.strokeStyle = g; ctx.lineWidth = 40;
+  ctx.beginPath(); ctx.arc(128, 128, 104, -Math.PI / 2 - 0.5, -Math.PI / 2 + 0.5); ctx.stroke();
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.42), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, opacity: 0, depthTest: false, depthWrite: false, toneMapped: false }));
+  m.position.set(0, 0, -0.5);
+  m.renderOrder = 2002;
+  m.visible = false;
+  camera.add(m);
+  return m;
+})();
+function showHitDirection(from) {
+  const v = from.clone();
+  getViewCamera().worldToLocal(v);
+  dirIndicator.rotation.z = Math.atan2(-v.x, -v.z);
+  dirIndicator.material.opacity = 1;
+  dirIndicator.visible = true;
+}
 // Bodenhöhe unter dem Spieler (steht er auf dem Bett/Tisch?)
 function playerFloor() {
   const g = groundAt(headPos.x, headPos.z);
   return g > 0 && headPos.y - g > 1.0 ? g : 0;
 }
-// Ein Skelett schlägt zu (Treffer-Moment seiner Animation)
-function enemyStrike(e) {
-  if (state !== 'playing') return;
-  const d = hyp(headPos.x - e.pos.x, headPos.z - e.pos.z);
-  if (d > 1.15) return; // zu weit weg – daneben
-  const chest = e.torso.localToWorld(new THREE.Vector3(0, 0.35, 0));
-  const sh = heldShield();
-  let blocked = false, at = null;
-  if (sh && sh.holder) {
-    at = sh.root.localToWorld(sh.center.clone());
-    const seg = new THREE.Line3(chest, headPos.clone().add(new THREE.Vector3(0, -0.25, 0)));
-    const cp = seg.closestPointToPoint(at, true, new THREE.Vector3());
-    blocked = cp.distanceTo(at) < 0.34;
-  } else if (sh && sh.desk) {
-    const toE = e.pos.clone().sub(headPos).setY(0).normalize();
-    getViewCamera().getWorldDirection(tmpV2).setY(0).normalize();
-    blocked = toE.dot(tmpV2) > 0.5;
-    at = sh.root.getWorldPosition(new THREE.Vector3());
-  }
-  if (blocked) {
-    SFX.clang();
-    sparks(at, chest.clone().sub(at).normalize(), 10);
-    bounceOff(e);
-    if (sh.holder) pulse(sh.holder, 0.9, 90);
+// Ein Angriff hat den Spieler getroffen. info: { dmg, zone, e, type, name, point, from }
+function playerHit(info) {
+  if (state !== 'playing' && state !== 'menu') return;
+  if (info.from) showHitDirection(info.from);
+  hurtFlash = info.zone === 'head' ? 1.4 : 1;
+  regenT = 5;
+  SFX_PLAYER.hurt();
+  if (info.type === 'blunt') SFX.thud(0.7);
+  for (const h of hands) pulse(h, 1, info.zone === 'head' ? 220 : 150);
+  if (settings.popups && info.name) floatingText(`${info.name}${info.zone === 'head' ? ' – Kopf!' : info.zone === 'legs' ? ' – Bein' : ''}`, inFront(0.9, 0, headPos.y - 0.28), '#ff8a7a');
+  playerHp -= info.dmg;
+  if (playerHp > 0) return;
+  if (state === 'menu') { // Übung/Duell im Menü: niemand stirbt
+    playerHp = 100;
+    floatingText('Das wäre dein Ende gewesen', inFront(1, 0, headPos.y), '#ff6a5a');
+    for (const e of enemies) e.stagger = Math.max(e.stagger, 1.2);
     return;
   }
-  playerHit(14);
+  playerHp = 0;
+  later(0, () => endRound(true));
 }
-function playerHit(dmg) {
-  playerHp -= dmg;
-  hurtFlash = 1;
-  regenT = 4;
-  SFX_PLAYER.hurt();
-  for (const h of hands) pulse(h, 1, 150);
-  if (playerHp <= 0) { playerHp = 0; later(0, () => endRound(true)); }
+// Ein Angriff wurde vom Spieler abgefangen. how: shield | parry (aktiv) | block (nur hingehalten) | weak | deflect
+function playerBlocked(info) {
+  const w = info.w, h = w && w.holder;
+  const n = tmpV.subVectors(headPos, info.point).normalize();
+  if (info.how === 'shield') { SFX.clang(); SFX.thud(0.5); sparks(info.point, n, 10); pulse(h, info.heavy ? 1 : 0.85, info.heavy ? 150 : 90); }
+  else if (info.how === 'parry') {
+    SFX.clang(); SFX.pin(); sparks(info.point, n, 14); pulse(h, 1, 70);
+    if (settings.popups) floatingText('Parade!', info.point.clone().add(new THREE.Vector3(0, 0.15, 0)), '#7dffa8');
+  } else if (info.how === 'block') { SFX.clang(); sparks(info.point, n, 6); pulse(h, 0.75, 60); }
+  else if (info.how === 'weak') {
+    SFX.clang(); SFX.thud(0.6); pulse(h, 1, 140);
+    if (settings.popups) floatingText('Durchgeschlagen!', info.point.clone().add(new THREE.Vector3(0, 0.15, 0)), '#ffb04a');
+  } else if (info.how === 'deflect') { SFX.clang(); sparks(info.point, n, 6); pulse(h, 0.7, 40); }
+  if (w && w.second) pulse(w.second, 0.7, 60);
+}
+Object.assign(player, {
+  hit: playerHit,
+  blocked: playerBlocked,
+  arrowStuck(obj, w) { // Pfeil bleibt im Schild stecken
+    w.root.attach(obj);
+    w.stuck.push(obj);
+    if (w.stuck.length > 6) w.root.remove(w.stuck.shift());
+    SFX.thunk();
+    pulse(w.holder, 0.8, 60);
+  },
+  defeated(e, how) {
+    kills++;
+    if (how === 'fled' && settings.popups) floatingText(`${e.name} ist geflohen`, inFront(1.2, 0, headPos.y), '#9ad');
+  }
+});
+// Kopf, Schilde und Klingen des Spielers für die Gegner bereitstellen (jedes Bild)
+const lastHead = new THREE.Vector3();
+function updateDefense(dt) {
+  if (dt > 0) player.vel.lerp(tmpV.subVectors(headPos, lastHead).divideScalar(dt), 0.2);
+  lastHead.copy(headPos);
+  player.head.copy(headPos);
+  player.floor = playerFloor();
+  player.shields.length = 0; player.blades.length = 0;
+  for (const w of arsenal) {
+    if (!(w.holder || w.desk)) continue;
+    if (w.def.shield) player.shields.push({ c: w.root.localToWorld(w.center.clone()), n: w.normal.clone().transformDirection(w.root.matrixWorld), r: w.def.shield.r, w });
+    else if (w.def.melee && w.prevTip) player.blades.push({ a: w.prevBase, b: w.prevTip, vel: w.tipVel, speed: w.desk ? (deskGuard && elapsed - deskGuardT < 0.4 ? 2 : 0) : w.tipSpeed, twoHand: w.twoHand, w });
+  }
+  // PC: der Klick-Schwung zählt als heranfliegende Klinge (damit Gegner darauf reagieren können)
+  if (deskW && deskW.deskHitT > 0 && deskW.deskRay) {
+    const R = deskW.deskRay, reach = (deskW.id === 'sword' ? 1.75 : 1.15) * (1 - deskW.deskHitT / 0.2 * 0.45);
+    player.blades.push({ a: R.o.clone().addScaledVector(R.d, 0.25), b: R.o.clone().addScaledVector(R.d, reach), vel: R.d.clone().multiplyScalar(5), speed: 5, twoHand: false, w: deskW });
+  }
 }
 function updatePlayer(dt) {
   hurtFlash = Math.max(0, hurtFlash - dt * 1.5);
   const low = state === 'playing' && playerHp < 35 ? (0.35 - playerHp / 100) * (0.6 + 0.4 * Math.sin(elapsed * 6)) : 0;
   hurtMesh.material.opacity = Math.min(0.6, hurtFlash * 0.45 + low);
   hurtMesh.visible = hurtMesh.material.opacity > 0.01;
-  if (state !== 'playing') return;
+  if (dirIndicator.visible) { dirIndicator.material.opacity -= dt * 0.9; if (dirIndicator.material.opacity <= 0) dirIndicator.visible = false; }
+  if (state !== 'playing' && state !== 'menu') return;
   regenT -= dt;
-  if (regenT <= 0 && playerHp < 100) playerHp = Math.min(100, playerHp + dt * 4);
-  if (playerHp < 35) { heartT -= dt; if (heartT <= 0) { heartT = 0.9; SFX_PLAYER.heartbeat(); } }
+  if (regenT <= 0 && playerHp < 100) playerHp = Math.min(100, playerHp + dt * 3);
+  if (state === 'playing' && playerHp < 35) { heartT -= dt; if (heartT <= 0) { heartT = 0.9; SFX_PLAYER.heartbeat(); } }
 }
 
-// ---- Anzeige: Leben & erledigte Skelette (VR: am Handgelenk, PC: unten links) --------
+// ---- Anzeige: Leben & besiegte Gegner (VR: am Handgelenk, PC: unten links) --------
 const hud = makePanel(0.13, 0.05, 2400);
 hud.mesh.renderOrder = 6;
 hud.mesh.visible = false;
@@ -1345,10 +1474,10 @@ scene.add(hud.mesh);
 let hudKey = '';
 function updateHud() {
   const show = state === 'playing';
-  const txt = `❤ ${Math.ceil(playerHp)}   💀 ${kills}`;
+  const txt = `❤ ${Math.ceil(playerHp)}   ⚔ ${kills}`;
   if (!renderer.xr.isPresenting) {
-    statusEl.style.display = show ? 'block' : 'none';
-    if (show) statusEl.textContent = `${txt}\n${deskW ? deskW.def.icon + ' ' + deskW.def.name : 'keine Waffe'}${deskShield ? ' + 🛡 Schild' : ''}\n1 Dolch · 2 Schwert · 3 Bogen · 4 Schild · F Dolch werfen`;
+    statusEl.style.display = show || enemies.length ? 'block' : 'none';
+    statusEl.textContent = `${txt}\n${deskW ? deskW.def.icon + ' ' + deskW.def.name : 'keine Waffe'}${deskShield ? ' + 🛡 Schild' : ''}\nKlick Hieb · E Stich · Leertaste Deckung · F Dolch werfen · Q Waffen-Menü`;
     hud.mesh.visible = false;
     return;
   }
@@ -1370,13 +1499,19 @@ function updateWeapons(dt) {
     else if (w.holder) {
       tmpM.multiplyMatrices(w.holder.ray.matrixWorld, HOLD_OFFSET);
       tmpM.decompose(w.root.position, w.root.quaternion, tmpS);
+      if (w.second) { // Schwert beidhändig: die zweite Hand am Knauf führt die Klinge mit
+        const d1 = tmpV.subVectors(w.holder.point, w.second.point);
+        w.twoHand = d1.length() > 0.07;
+        if (w.twoHand) {
+          d1.normalize();
+          const d0 = tmpV2.subVectors(w.tip, w.base).normalize().applyQuaternion(w.root.quaternion);
+          if (d0.dot(d1) > 0.1) w.root.quaternion.premultiply(tmpQ.setFromUnitVectors(d0, d1));
+        }
+      }
       w.root.updateMatrixWorld(true);
-      if (w.def.melee && state !== 'setup') meleeUpdate(w, dt, w.holder);
-    } else if (w.desk && w.def.melee && w.deskSwing > 0) { // PC-Schwung
-      w.deskSwing -= dt;
-      const k = 1 - Math.max(0, w.deskSwing) / 0.28;
-      w.root.rotation.set(-1.4 * Math.sin(k * Math.PI), 0, 0.5 * Math.sin(k * Math.PI));
-    }
+      if (w.def.melee) meleeUpdate(w, dt, w.holder);
+      else if (w.def.shield) shieldUpdate(w, dt, w.holder);
+    } else if (w.desk) deskWeaponUpdate(w, dt);
   }
   for (const h of hands) if (h.drawing) bowUpdate(h);
   // Pull: Waffe fliegt per Laser + Griff-Taste in die Hand
@@ -1412,12 +1547,13 @@ function refreshMenu() {
   const nDoor = surfacesOf('door').length, nWin = surfacesOf('window').length;
   menuPanel.set((ctx, w) => {
     const r = lastResult;
-    if (r) text(ctx, `${r.died ? '💀 Die Skelette haben dich erwischt!' : 'Runde beendet'} · ${r.kills} Skelette erledigt · ${r.time}`, w / 2, 420, 24, '#ffcc33', 'center', true);
+    if (r) text(ctx, `${r.died ? '💀 Du bist gefallen' : 'Runde beendet'} · ${r.kills} Gegner besiegt · ${r.time}`, w / 2, 420, 24, '#ffcc33', 'center', true);
     text(ctx, '🏰 Burg-Abwehr', w / 2, 48, 48, '#fff', 'center', true);
     text(ctx, 'Waffen holen: 🗡 Waffen-Menü (VR: A/X-Taste, PC: Q) – jederzeit, auch im Spiel', w / 2, 470, 20, '#cfd8e3');
-    text(ctx, 'Bogen: Sehne mit der anderen Hand ziehen · Dolch im Schwung loslassen = Wurf', w / 2, 500, 19, '#cfd8e3');
+    text(ctx, 'Schild/Klinge in den Schlag halten = Block · Klinge entgegenführen = Parade', w / 2, 500, 19, '#cfd8e3');
+    text(ctx, 'Hieb mit der Schneide · Stich geht durch Rüstung · Schwert mit beiden Händen fassen', w / 2, 528, 19, '#cfd8e3');
     text(ctx, `Raum: ${surfacesOf('wall').length} Wände · ${nDoor} Türen · ${nWin} Fenster · ${surfacesOf('table', 'chair').length} Möbel`, w / 2, 104, 24, '#9ad', 'center', true);
-    text(ctx, nDoor + nWin ? 'Die Skelette kommen durch deine Türen und Fenster.' : '⚠ Keine Türen/Fenster eingezeichnet – Skelette steigen aus dem Boden.', w / 2, 140, 22, nDoor + nWin ? '#cfd8e3' : '#ffb04a');
+    text(ctx, nDoor + nWin ? 'Die Angreifer kommen durch deine Türen und Fenster.' : '⚠ Keine Türen/Fenster eingezeichnet – Angreifer tauchen im Raum auf.', w / 2, 140, 22, nDoor + nWin ? '#cfd8e3' : '#ffb04a');
     text(ctx, `Version ${VERSION}`, w - 24, 664, 18, '#6b7a90', 'right');
   }, [
     ...row(180, 70, [{ id: 'start', label: '▶ START', font: 42, onClick: startPressed }], 792, 200),
@@ -1469,24 +1605,27 @@ function startPressed() {
   spawnT = 3; spawned = 0;
   playerHp = 100; kills = 0; roundT = 0; lastResult = null; hudKey = '';
   SFX.ui();
-  speak('Die Skelette kommen');
+  speak('Sie kommen');
   if (!arsenal.some(w => w.holder || w.desk)) openWeaponMenu(); // noch keine Waffe in der Hand: gleich aussuchen
   else floatingText('Waffen-Menü: A/X (PC: Q) · Pause: Stick oder B/Y (PC: Esc)', inFront(1.2, 0, headPos.y - 0.1), '#ffd36a');
 }
 function updateGame(dt) {
   updatePlayer(dt);
-  if (state === 'menu') { updateEnemies(dt, headPos, playerFloor()); return; } // Übungsskelette im Menü
-  if (state !== 'playing' || weaponPanel.visible) return; // Waffen-Menü offen: alles steht still
+  updateDefense(dt);
+  if (weaponPanel.visible) return; // Waffen-Menü offen: alles steht still
+  if (state === 'menu') { updateEnemies(dt); return; } // Übungsgegner und Duelle im Menü
+  if (state !== 'playing') return;
   roundT += dt;
-  // langsam schwerer: mehr Skelette gleichzeitig und schnellerer Nachschub
-  const maxAlive = Math.min(8, 2 + Math.floor(roundT / 25));
+  // langsam schwerer: mehr und gefährlichere Gegner, später greifen zwei gleichzeitig an
+  combatOpts.tokens = roundT < 50 ? 1 : 2;
+  const maxAlive = Math.min(6, 2 + Math.floor(roundT / 40));
   spawnT -= dt;
   if (spawnT <= 0 && aliveCount() < maxAlive) {
-    spawnEnemy(headPos, Math.min(1.35, 1 + roundT / 400));
+    spawnEnemy(headPos, { type: pickType(roundT) });
     spawned++;
-    spawnT = THREE.MathUtils.randFloat(2.5, 4.5) * Math.max(0.45, 1 - roundT / 200);
+    spawnT = THREE.MathUtils.randFloat(4, 7) * Math.max(0.5, 1 - roundT / 280);
   }
-  updateEnemies(dt, headPos, playerFloor());
+  updateEnemies(dt);
 }
 function endRound(died) {
   if (state !== 'playing') return;
@@ -1501,11 +1640,11 @@ function endRound(died) {
 // =============================================================================
 // Waffen-Menü (Untermenü): Waffe aussuchen → kommt in die Hand. Jederzeit über A/X bzw. Q.
 // =============================================================================
-const weaponPanel = new UIPanel(1.0, 0.72, 760);
+const weaponPanel = new UIPanel(1.0, 0.86, 760);
 weaponPanel.border = '#ffb347';
 weaponPanel.visible = false;
 let uiClickHand = null; // welche Hand gerade einen Knopf drückt (dorthin kommt die Waffe)
-let weaponMsg = '';
+let weaponMsg = '', trainType = 'soldier';
 function openWeaponMenu() {
   if (state !== 'playing' && state !== 'menu') return;
   menuPanel.visible = false;
@@ -1521,22 +1660,28 @@ function closeWeaponMenu() {
 }
 function toggleWeaponMenu() { if (weaponPanel.visible) closeWeaponMenu(); else openWeaponMenu(); }
 function refreshWeaponMenu() {
-  const W = 760;
+  const W = 760, T = ENEMY_TYPES[trainType];
   weaponPanel.set((ctx, w) => {
     text(ctx, '🗡 Waffen-Menü', w / 2, 40, 40, '#fff', 'center', true);
     text(ctx, renderer.xr.isPresenting ? 'Waffe anklicken → sie kommt in die Hand, mit der du klickst.' : 'Waffe anklicken → du hast sie in der Hand (Schild links).', w / 2, 84, 21, '#cfd8e3');
     text(ctx, renderer.xr.isPresenting ? 'Loslassen: Griff-Taste drücken und loslassen · Menü auf/zu: A/X' : 'Menü auf/zu: Q · Waffen auch mit 1–4', w / 2, 112, 19, '#9ad');
-    if (weaponMsg) text(ctx, weaponMsg, w / 2, 424, 22, '#7dffa8', 'center', true);
-    text(ctx, `${arsenal.length} Waffen im Raum`, w - 24, 528, 17, '#6b7a90', 'right');
+    text(ctx, 'Übungsgegner – „Passiv“ steht still, „Duell“ kämpft gegen dich:', w / 2, 346, 19, '#9ad');
+    if (weaponMsg) text(ctx, weaponMsg, w / 2, 516, 22, '#7dffa8', 'center', true);
+    text(ctx, `${arsenal.length} Waffen · ${enemies.length} Gegner im Raum`, w - 24, 630, 17, '#6b7a90', 'right');
   }, [
-    ...row(140, 92, WEAPON_ORDER.slice(0, 2).map(id => ({ id: 'w_' + id, label: `${WEAPONS[id].icon} ${WEAPONS[id].name}`, font: 32, onClick: () => pickWeapon(id) })), W),
-    ...row(244, 92, WEAPON_ORDER.slice(2).map(id => ({ id: 'w_' + id, label: `${WEAPONS[id].icon} ${WEAPONS[id].name}`, font: 32, onClick: () => pickWeapon(id) })), W),
-    ...row(350, 50, [
-      { id: 'dummy', label: '🎯 Übungsskelett', font: 23, onClick: () => { spawnDummy(); weaponMsg = 'Übungsskelett steht vor dir – es wehrt sich nicht'; refreshWeaponMenu(); } },
-      { id: 'fetch', label: '🧲 Waffen herholen', font: 23, disabled: !arsenal.length, onClick: () => { placeOnRack(false); weaponMsg = 'Waffen schweben vor dir'; refreshWeaponMenu(); } },
-      { id: 'clearw', label: '🧹 Wegräumen', font: 23, disabled: !arsenal.length, onClick: () => { clearWeapons(); weaponMsg = 'Alle Waffen weggeräumt'; refreshWeaponMenu(); } }
+    ...row(140, 86, WEAPON_ORDER.slice(0, 2).map(id => ({ id: 'w_' + id, label: `${WEAPONS[id].icon} ${WEAPONS[id].name}`, font: 32, onClick: () => pickWeapon(id) })), W),
+    ...row(236, 86, WEAPON_ORDER.slice(2).map(id => ({ id: 'w_' + id, label: `${WEAPONS[id].icon} ${WEAPONS[id].name}`, font: 32, onClick: () => pickWeapon(id) })), W),
+    ...row(366, 56, [
+      { id: 'ttype', label: `◀ ${T.name} ▶`, font: 24, onClick: () => { trainType = TYPE_ORDER[(TYPE_ORDER.indexOf(trainType) + 1) % TYPE_ORDER.length]; weaponMsg = ''; refreshWeaponMenu(); } },
+      { id: 'dummy', label: '🎯 Passiv', font: 24, onClick: () => { spawnTrainer(true); weaponMsg = `${T.name} steht vor dir – wehrt sich nicht`; refreshWeaponMenu(); } },
+      { id: 'duel', label: '⚔ Duell', font: 24, onClick: () => { spawnTrainer(false); weaponMsg = `${T.name} fordert dich – Menü schließen, dann geht es los`; refreshWeaponMenu(); } }
     ], W, 30, 12),
-    ...row(450, 58, [{ id: 'close', label: state === 'playing' ? '✔ Los geht’s' : '◀ Zurück', font: 30, onClick: closeWeaponMenu }], W, 230)
+    ...row(434, 52, [
+      { id: 'fetch', label: '🧲 Waffen herholen', font: 22, disabled: !arsenal.length, onClick: () => { placeOnRack(false); weaponMsg = 'Waffen schweben vor dir'; refreshWeaponMenu(); } },
+      { id: 'clearw', label: '🧹 Waffen weg', font: 22, disabled: !arsenal.length, onClick: () => { clearWeapons(); weaponMsg = 'Alle Waffen weggeräumt'; refreshWeaponMenu(); } },
+      { id: 'cleare', label: '🧹 Gegner weg', font: 22, disabled: !enemies.length || state === 'playing', onClick: () => { clearEnemies(); weaponMsg = 'Alle Gegner entfernt'; refreshWeaponMenu(); } }
+    ], W, 30, 12),
+    ...row(544, 58, [{ id: 'close', label: state === 'playing' ? '✔ Los geht’s' : '◀ Zurück', font: 30, onClick: closeWeaponMenu }], W, 230)
   ]);
 }
 function pickWeapon(id) {
@@ -1546,18 +1691,11 @@ function pickWeapon(id) {
   weaponMsg = `${WEAPONS[id].icon} ${WEAPONS[id].name} geholt`;
   refreshWeaponMenu();
 }
-// Übungsskelett: steht vor dir, greift nicht an
-function spawnDummy() {
+// Übungsgegner: „passiv“ steht vor dir und wehrt sich nicht · sonst ein Duell gegen einen kämpfenden Gegner
+function spawnTrainer(passive) {
   prepareNav(headPos);
-  const e = spawnEnemy(headPos);
-  e.state = 'dummy';
-  const p = inFront(1.5, -0.5, 0); // etwas rechts (das Menü hängt links)
-  e.pos.set(p.x, 0, p.z);
-  e.y = 0;
-  e.body.position.y = 0;
-  e.yaw = Math.atan2(headPos.x - p.x, headPos.z - p.z);
-  e.root.position.copy(e.pos);
-  e.root.rotation.y = e.yaw;
+  const p = inFront(passive ? 1.5 : 2.7, -0.5, 0); // etwas rechts (das Menü hängt links)
+  return spawnEnemy(headPos, { type: trainType, at: p, passive });
 }
 
 // =============================================================================
@@ -1566,7 +1704,7 @@ function spawnDummy() {
 const mouseNdc = new THREE.Vector2();
 let lookYaw = 0, lookPitch = -0.2, rightDrag = false, lastX = 0, lastY = 0;
 const keys = new Set();
-let deskW = null, deskShield = null, deskDraw = 0, deskDrawing = false;
+let deskW = null, deskShield = null, deskDraw = 0, deskDrawing = false, deskGuard = false, deskGuardT = -9;
 // PC: Waffe vor die Kamera nehmen (Schild in die linke Hand, andere Waffen rechts)
 function equipDesk(idOrW) {
   const w = typeof idOrW === 'string' ? (arsenal.find(x => x.id === idOrW && !x.thrown) || newWeapon(idOrW)) : idOrW;
@@ -1599,19 +1737,41 @@ function placeOnRackOne(w, fresh = false) {
   }
   poseFloating(w, elapsed);
 }
-// PC-Angriff: Klick = Schwung in Blickrichtung (Fadenkreuz)
-function deskAttack() {
+// PC-Angriff: Klick = Hieb, E = Stich – jeweils dorthin, wo das Fadenkreuz hinzeigt (Kopf, Arm, Bein …)
+function deskAttack(thrust = false) {
   const w = deskW;
   if (!w || !w.def.melee || w.deskSwing > 0) return;
-  w.deskSwing = 0.28;
-  SFX.whoosh();
+  w.deskSwing = 0.32; w.deskThrust = thrust; w.deskHitT = 0.2;
   raycaster.setFromCamera(mouseNdc, camera);
-  const reach = w.id === 'sword' ? 1.7 : 1.1;
-  const a = raycaster.ray.origin.clone(), b = a.clone().addScaledVector(raycaster.ray.direction, reach);
-  const hit = hitTest(a, b, w.id === 'sword' ? 0.12 : 0.06);
+  w.deskRay = { o: raycaster.ray.origin.clone(), d: raycaster.ray.direction.clone() };
+  SFX.whoosh();
+}
+function deskStrike(w) { // Treffer-Moment des PC-Schwungs
+  const R = w.deskRay, reach = w.id === 'sword' ? 1.75 : 1.15, M = w.def.melee;
+  const hit = strikeTest(R.o.clone().addScaledVector(R.d, 0.25), R.o.clone().addScaledVector(R.d, reach), w.id === 'sword' ? 0.06 : 0.04, true);
   if (!hit) return;
-  const r = damageEnemy(hit.e, w.def.melee.dmg * 1.1, hit.zone, hit.point, raycaster.ray.direction.clone().setY(0).normalize(), w.id === 'sword' ? 1.2 : 0.6);
-  onEnemyHit(hit, r);
+  if (hit.kind !== 'body') { enemyBlocked(hit, null); return; }
+  const type = w.deskThrust ? 'thrust' : 'slash';
+  const r = applyHit(hit.e, hit.zone, { type, power: (w.deskThrust ? M.thrust : M.slash) * 1.1, dir: R.d.clone(), point: hit.point, knock: w.id === 'sword' ? 1.2 : 0.5 });
+  onEnemyHit(hit, r, { type });
+}
+// PC: Haltung der Waffen an der Kamera – Grundstellung, Schwung/Stich, Deckung (Leertaste)
+function deskWeaponUpdate(w, dt) {
+  if (w.def.shield) {
+    if (deskGuard) { w.root.position.lerp(tmpV.set(-0.04, -0.17, -0.46), Math.min(1, dt * 18)); w.root.rotation.set(0, 0, 0); }
+    else { w.root.position.lerp(tmpV.set(-0.42, -0.42, -0.62), Math.min(1, dt * 12)); w.root.rotation.set(0, 0.45, 0); }
+  } else if (w.def.melee) {
+    if (w.deskHitT > 0) { w.deskHitT -= dt; if (w.deskHitT <= 0) deskStrike(w); }
+    if (w.deskSwing > 0) {
+      w.deskSwing -= dt;
+      const k = 1 - Math.max(0, w.deskSwing) / 0.32, s = Math.sin(k * Math.PI);
+      if (w.deskThrust) { w.root.position.set(0.2, -0.24, -0.45 - 0.4 * s); w.root.rotation.set(-0.5, 0, 0); }
+      else { w.root.position.set(0.25, -0.28, -0.45); w.root.rotation.set(-1.4 * s, 0, 0.5 * s); }
+    } else if (deskGuard && !deskShield) { w.root.position.lerp(tmpV.set(0.32, 0.2, -0.3), Math.min(1, dt * 18)); w.root.rotation.set(0, Math.PI / 2, 0); } // „Dach“: Klinge quer über dem Kopf
+    else { w.root.position.lerp(tmpV.set(0.25, -0.28, -0.45), Math.min(1, dt * 12)); w.root.rotation.set(0, 0, 0); }
+  } else return;
+  w.root.updateWorldMatrix(true, true);
+  if (w.def.melee) bladeState(w, dt);
 }
 function deskThrowDagger() {
   const w = deskW;
@@ -1657,7 +1817,7 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
     if (hit) { const w = ws.find(x => { let o = hit.object; while (o) { if (o === x.root) return true; o = o.parent; } return false; }); if (w) { equipDesk(w.id); return; } }
   }
   if (deskW && deskW.def.bow) { deskDrawing = true; deskDraw = 0; SFX.click(500, 0.3, 0.05); return; }
-  if (state === 'playing' || state === 'menu') deskAttack();
+  if (state === 'playing' || state === 'menu') deskAttack(false);
 });
 window.addEventListener('pointerup', (e) => {
   if (e.button === 2) rightDrag = false;
@@ -1679,10 +1839,12 @@ window.addEventListener('keydown', (e) => {
     const n = parseInt(e.key, 10);
     if (n >= 1 && n <= 4) equipDesk(WEAPON_ORDER[n - 1]);
     if (e.key === 'f' || e.key === 'F') deskThrowDagger();
+    if (e.key === 'e' || e.key === 'E') deskAttack(true);
+    if (e.code === 'Space' && !deskGuard) { deskGuard = true; deskGuardT = elapsed; e.preventDefault(); }
     if ((e.key === 'q' || e.key === 'Q') && (state === 'playing' || state === 'menu')) toggleWeaponMenu();
   }
 });
-window.addEventListener('keyup', (e) => keys.delete(e.code));
+window.addEventListener('keyup', (e) => { keys.delete(e.code); if (e.code === 'Space') deskGuard = false; });
 // PC: mit WASD durch den Raum gehen
 function updateDesktopMove(dt) {
   const f = (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0), s = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0);
@@ -1756,7 +1918,7 @@ pausePanel.visible = false;
 function refreshPause() {
   pausePanel.set((ctx, w) => {
     text(ctx, '⏸ Pause', w / 2, 52, 48, '#fff', 'center', true);
-    text(ctx, `❤ ${Math.ceil(playerHp)} · 💀 ${kills} erledigt`, w / 2, 96, 24, '#cfd8e3');
+    text(ctx, `❤ ${Math.ceil(playerHp)} · ⚔ ${kills} besiegt`, w / 2, 96, 24, '#cfd8e3');
     text(ctx, 'Pause/weiter: Stick drücken oder Y/B (PC: Esc)', w / 2, 398, 18, '#8796ad');
   }, [
     ...row(120, 70, [{ id: 'resume', label: '▶ Weiter', font: 36, onClick: () => setPaused(false) }], 630, 60),
@@ -1892,7 +2054,7 @@ function frameInner() {
 applySettings();
 window.__cam = camera;
 window.__game = {
-  renderer, room, hands, enemies, arsenal, uiPanels, get playerHp() { return playerHp; }, set playerHp(v) { playerHp = v; }, get kills() { return kills; }, placeOnRack, equipDesk, giveWeapon, openWeaponMenu, closeWeaponMenu, get weaponPanel() { return weaponPanel; }, deskAttack, enemyStrike, teleport: (x, z) => { camera.position.x = x; camera.position.z = z; }, settings, setup, menuPanel, setupPanel, pausePanel,
+  renderer, room, hands, enemies, arsenal, uiPanels, get playerHp() { return playerHp; }, set playerHp(v) { playerHp = v; }, get kills() { return kills; }, placeOnRack, equipDesk, giveWeapon, openWeaponMenu, closeWeaponMenu, get weaponPanel() { return weaponPanel; }, deskAttack, spawnTrainer, player, combatOpts, take: (id, i) => { const w = newWeapon(id); takeWeapon(w, hands[i]); return w; }, get roundT() { return roundT; }, set roundT(v) { roundT = v; }, spawn: (type, at, passive) => spawnEnemy(headPos, { type, at, passive }), set trainType(v) { trainType = v; }, teleport: (x, z) => { camera.position.x = x; camera.position.z = z; }, settings, setup, menuPanel, setupPanel, pausePanel,
   get state() { return state; }, get paused() { return paused; }, get errors() { return errorCount; }, get floorOffset() { return floorOffset; },
   startPressed, enterMenu, enterSetup, finishSetup, setPaused, spawnEnemy: () => spawnEnemy(headPos), setTool, setupTriggerDown, setupTriggerUp,
   alignToLine, loadSlot, saveSlot, serializeRoom, surfaceAt, updateSetup

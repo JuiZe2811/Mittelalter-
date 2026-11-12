@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { makePanel } from './util.js?v=6';
-import { heightAt } from './room.js?v=6';
-import { SFX } from './sfx.js?v=6';
+import { makePanel } from './util.js?v=7';
+import { heightAt } from './room.js?v=7';
+import { SFX } from './sfx.js?v=7';
 
 // Kurzlebige Effekte: Leuchtspuren, Partikel, Punkte-Text, Einschusslöcher, Hülsen
 let scene;
