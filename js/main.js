@@ -1,16 +1,18 @@
 import * as THREE from 'three';
-import { VERSION } from './version.js?v=10';
+import { VERSION } from './version.js?v=11';
 import { ARButton } from 'three/addons/webxr/ARButton.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { makePanel, panelBg, roundRect } from './util.js?v=10';
-import { SFX, SFX_PLAYER, ensureAudio, setListener, setVolumes, setAudioPaused } from './sfx.js?v=10';
-import { segPoint } from './geom.js?v=10';
-import { stepPhysics, addDynamic, removeDynamic, localBoxOf } from './physics.js?v=10';
-import { initEnemies, spawnEnemy, updateEnemies, clearEnemies, prepareNav, aliveCount, enemies, strikeTest, applyHit, shoveEnemy, hitShield, teamOpening, notifyShot, beatWeapon, pushEnemy, player, opts as combatOpts, pickType, ENEMY_TYPES, TYPE_ORDER, warmupGroup } from './enemies.js?v=10';
-import { groundAt } from './nav.js?v=10';
-import { WEAPON_ORDER, WEAPONS, createWeapon, setBowString, setXbowString, xbowPull, initWeapons, shootArrow, throwWeapon, updateFlying, clearFlying } from './weapons.js?v=10';
-import { room, addWall, addBox, makeWall, makeBox, rotateBox, removeSurface, clearRoom, setEditMode, suggestYaw, surfacesOf, importDetectedPlanes, saveRoom, loadRoom, hasSavedRoom, surfaceName, serializeRoom, deserializeRoom, roomSlots, saveRoomSlot, loadRoomSlot, addOpening, makeOpening, roomOccluders, setAtmosphere, closeRoomGaps, closeRoom, openWallEnds } from './room.js?v=10';
-import { initEffects, headRef, floatingText, updateEffects, updateDebris, fx, clearDebris, sparks, warmText, burst } from './effects.js?v=10';
+import { makePanel, panelBg, roundRect } from './util.js?v=11';
+import { SFX, SFX_PLAYER, ensureAudio, setListener, setVolumes, setAudioPaused } from './sfx.js?v=11';
+import { segPoint, segSeg } from './geom.js?v=11';
+import { stepPhysics, addDynamic, removeDynamic, localBoxOf } from './physics.js?v=11';
+import { initEnemies, spawnEnemy, updateEnemies, clearEnemies, prepareNav, aliveCount, enemies, strikeTest, applyHit, shoveEnemy, hitShield, teamOpening, notifyShot, beatWeapon, pushEnemy, bindTest, bindPush, enemyWeaponSeg, player, opts as combatOpts, pickType, ENEMY_TYPES, TYPE_ORDER, warmupGroup } from './enemies.js?v=11';
+import { groundAt } from './nav.js?v=11';
+import { WEAPON_ORDER, WEAPONS, createWeapon, setBowString, setXbowString, xbowPull, initWeapons, shootArrow, throwWeapon, updateFlying, clearFlying, updateChain, makeArrowMesh } from './weapons.js?v=11';
+import { createHolsters, updateHolsters, slotNear, fits, holsterPose } from './holster.js?v=11';
+import { setWarn, surfaceDistance } from './room.js?v=11';
+import { room, addWall, addBox, makeWall, makeBox, rotateBox, removeSurface, clearRoom, setEditMode, suggestYaw, surfacesOf, importDetectedPlanes, saveRoom, loadRoom, hasSavedRoom, surfaceName, serializeRoom, deserializeRoom, roomSlots, saveRoomSlot, loadRoomSlot, addOpening, makeOpening, roomOccluders, setAtmosphere, closeRoomGaps, closeRoom, openWallEnds } from './room.js?v=11';
+import { initEffects, headRef, floatingText, updateEffects, updateDebris, fx, clearDebris, sparks, warmText, burst } from './effects.js?v=11';
 const clamp = THREE.MathUtils.clamp;
 const hyp = (a, b, c = 0) => Math.sqrt(a * a + b * b + c * c); // schneller als Math.hypot und ohne Speicher-Müll
 
@@ -199,7 +201,7 @@ function pointerTarget(h) {
     if (ph.object.userData.ui.buttonAt(ph.uv)) { best = { kind: 'ui', dist: ph.distance, panel: ph.object.userData.ui, uv: ph.uv }; break; }
   }
   if (!best && (state === 'playing' || state === 'menu')) for (const w of arsenal) { // Waffen aus der Ferne heranziehen
-    if (w.holder || w.thrown || !w.root.visible) continue;
+    if (w.holder || w.thrown || !w.root.visible || w.holstered) continue;
     const box = new THREE.Box3().setFromObject(w.root).expandByScalar(0.04);
     const p = raycaster.ray.intersectBox(box, tmpV2);
     if (p) { const d = p.distanceTo(tmpV); if (d < 5 && (!best || d < best.dist)) best = { kind: 'weapon', w, dist: d }; }
@@ -211,7 +213,7 @@ function updateHandsXR(dt) {
   for (const h of hands) {
     if (!h.src) { h.pointer.visible = false; continue; }
     h.tipMarker.visible = state === 'setup' && setup.tool === 'floor';
-    const free = !h.held && !h.drawing && !h.pull && !h.grip2;
+    const free = !h.held && !h.drawing && !h.pull && !h.grip2 && !h.arrow;
     const wasHolding = !!h.held;
     // Zeigestrahl (im Einrichtungsmodus als Laser bis zum Boden / zur Wand)
     let pt = null;
@@ -244,12 +246,22 @@ function updateHandsXR(dt) {
     // Griff-Taste: Sehne greifen (andere Hand hält den Bogen), Waffe nehmen oder per Laser heranziehen
     if (down(h, 'squeeze') && free && state !== 'setup') {
       const ow = otherHand(h).held;
-      if (ow && ow.def.bow && !ow.loaded && h.point.distanceTo(ow.model.localToWorld(ow.nock.clone())) < 0.25) { h.drawing = ow; ow.draw = 0; SFX.click(500, 0.3, 0.05); pulse(h, 0.4, 30); }
+      const nockDist = ow && ow.def.bow && !ow.loaded ? h.point.distanceTo(ow.model.localToWorld(ow.nock.clone())) : 9;
+      const realQuiver = settings.quiver && settings.holsters && ow && ow.def.bow && !ow.def.crossbow;
+      const quiverSlot = settings.quiver && settings.holsters ? slotNear(holsters, h.point, 0.22, (S) => S.def.kind === 'quiver') : null;
+      if (nockDist < 0.25 && !realQuiver) { h.drawing = ow; ow.draw = 0; SFX.click(500, 0.3, 0.05); pulse(h, 0.4, 30); }
+      else if (quiverSlot && !h.arrow) { // Pfeil aus dem Köcher ziehen
+        h.arrow = makeArrowMesh(0); scene.add(h.arrow); SFX.click(700, 0.25, 0.05); pulse(h, 0.5, 40);
+      } else if (ow && !ow.def.twoHand && h.point.distanceTo(ow.root.position) < 0.09) { // Übergabe in die andere Hand
+        const o = otherHand(h); o.held = null; ow.holder = null; takeWeapon(ow, h); pulse(o, 0.3, 30);
+      }
       else if (ow && ow.def.twoHand && !ow.second && (h.point.distanceTo(ow.root.localToWorld(ow.grip2.clone())) < 0.22 || segPoint(ow.root.localToWorld(ow.ga.clone()), ow.root.localToWorld(ow.gb.clone()), h.point) < 0.09)) { // beidhändig fassen (Griff, Schaft oder Klinge)
         ow.second = h; h.grip2 = ow; SFX.grab(); pulse(h, 0.5, 40); pulse(otherHand(h), 0.3, 30);
       } else {
+        const S = settings.holsters ? slotNear(holsters, h.point, 0.17, (S) => !!S.weapon) : null;
         const w = weaponNear(h);
-        if (w) takeWeapon(w, h);
+        if (S && (!w || S.anchor.position.distanceTo(h.point) < 0.12)) { const sw = S.weapon; takeWeapon(sw, h); SFX.whoosh(); } // aus dem Holster ziehen
+        else if (w) takeWeapon(w, h);
         else if (pt && pt.kind === 'weapon') { h.pull = { w: pt.w }; SFX.whoosh(); }
       }
     }
@@ -403,6 +415,14 @@ const SETTINGS_TABS = {
     { key: 'throwBoost', label: 'Wurfkraft', opts: [[1, 'Normal'], [1.3, 'Stärker'], [1.6, 'Sehr stark']] },
     { key: 'haptics', label: 'Vibration', opts: [[0, 'Aus'], [0.5, 'Schwach'], [1, 'Normal'], [1.5, 'Stark']] }
   ] },
+  koerper: { label: '🎒 Körper', items: [
+    { key: 'holsters', label: 'Holster am Körper', opts: onOff },
+    { key: 'quiver', label: 'Pfeile aus dem Köcher ziehen', opts: [[true, 'An (echt)'], [false, 'Aus (bequem)']] },
+    { key: 'height', label: 'Körpergröße', opts: [[1.55, '1,55 m'], [1.65, '1,65 m'], [1.75, '1,75 m'], [1.85, '1,85 m'], [1.95, '1,95 m']] },
+    { key: 'hipOffset', label: 'Hüft-Holster', opts: [[-0.08, 'weiter hinten'], [0, 'normal'], [0.08, 'weiter vorne']] },
+    { key: 'leftHanded', label: 'Linkshänder (Köcher links)', opts: onOff },
+    { key: 'safety', label: 'Sicherheitsabstand zu Wänden/Möbeln', opts: [[0, 'Aus'], [0.3, '30 cm'], [0.5, '50 cm'], [0.8, '80 cm']] }
+  ] },
   grafik: { label: '✨ Grafik', items: [
     { key: 'quality', label: 'Leistung', opts: [['quality', 'Schön'], ['balanced', 'Ausgewogen'], ['fast', 'Flüssig']] },
     { key: 'shadows', label: 'Echte Schatten', opts: onOff },
@@ -415,7 +435,7 @@ const SETTINGS_TABS = {
 };
 const SETTINGS_DEFAULT = {
   master: 9, sfx: 10, music: 6, voices: 10, announcer: 10, announcerVoice: 'deep',
-  haptics: 1, popups: true, difficulty: 'normal', blood: 1, grip: 'hold', gripAngle: 0, gripSpace: true, weight: 1, trails: true, throwBoost: 1.3, fps: false,
+  haptics: 1, popups: true, difficulty: 'normal', blood: 1, grip: 'hold', gripAngle: 0, gripSpace: true, holsters: true, quiver: true, height: 1.75, hipOffset: 0, leftHanded: false, safety: 0.5, weight: 1, trails: true, throwBoost: 1.3, fps: false,
   quality: 'balanced', shadows: false, particles: 1, dust: true, frameRate: 90, autoPerf: true
 };
 const settings = Object.assign({}, SETTINGS_DEFAULT, load('burg-einstellungen', {}));
@@ -1161,6 +1181,19 @@ function finishSetup() {
 // Waffen in der Welt: schweben zu Beginn vor dem Spieler, lassen sich greifen, fallen mit Physik herunter
 // =============================================================================
 const arsenal = []; // alle Waffen in der Welt (aus dem Waffen-Menü geholt)
+const holsters = createHolsters(scene);
+const _hpose = new THREE.Object3D();
+// Waffe ins Holster stecken: sitzt fest am Körper, bewegt sich mit
+function holster(w, S) {
+  freeWeapon(w);
+  w.floating = false;
+  S.weapon = w; w.holstered = S;
+  S.anchor.add(w.root);
+  holsterPose(S, w, _hpose);
+  w.root.position.copy(_hpose.position); w.root.quaternion.copy(_hpose.quaternion);
+  w.root.visible = true; w.root.scale.setScalar(1);
+  SFX.click(900, 0.35, 0.04); SFX.thud(0.2);
+}
 const MAX_WEAPONS = 16;
 function newWeapon(id) {
   const w = createWeapon(id);
@@ -1187,7 +1220,8 @@ function giveWeapon(id, h = null) {
   else placeOnRackOne(w, true);
   return w;
 }
-function freeWeapon(w) { // aus Hand/Physik/Flug lösen
+function freeWeapon(w) { // aus Hand/Physik/Flug/Holster lösen
+  if (w.holstered) { w.holstered.weapon = null; w.holstered = null; }
   if (w.second) { w.second.grip2 = null; w.second = null; }
   w.twoHand = false; w.prevTip = w.prevBase = w.prevC = null; w.tipSpeed = 0;
   if (w.holder) { const h = w.holder; if (h.held === w) h.held = null; if (h.drawing && h.drawing === w) h.drawing = null; w.holder = null; }
@@ -1254,7 +1288,7 @@ function takeWeapon(w, h) {
 function weaponNear(h) {
   let best = null, bd = 0.13;
   for (const w of arsenal) {
-    if (w.holder || w.thrown || !w.root.visible || w.desk) continue;
+    if (w.holder || w.thrown || !w.root.visible || w.desk || w.holstered) continue;
     const d = new THREE.Box3().setFromObject(w.root).distanceToPoint(h.point);
     if (d < bd) { bd = d; best = w; }
   }
@@ -1262,6 +1296,7 @@ function weaponNear(h) {
 }
 function releaseHand(h) {
   h.pull = null;
+  if (h.arrow) { const a = h.arrow; h.arrow = null; scene.attach(a); addDebris(a, h.vel.clone(), 3); }
   if (h.grip2) { h.grip2.second = null; h.grip2.twoHand = false; h.grip2 = null; return; } // zweite Hand lässt den Schwertgriff los
   if (h.drawing) { bowRelease(h); return; }
   const w = h.held;
@@ -1270,6 +1305,10 @@ function releaseHand(h) {
   w.holder = null;
   // Bogen loslassen: Sehne der anderen Hand ebenfalls lösen
   for (const o of hands) if (o.drawing === w) { o.drawing = null; setBowString(w, null); }
+  if (settings.holsters && (renderer.xr.isPresenting || window.__xrTest) && h.vel.length() < 2.2) {
+    const S = slotNear(holsters, h.point, 0.2, (S) => fits(S, w));
+    if (S) { holster(w, S); pulse(h, 0.6, 40); return; }
+  }
   const tv = h.throwVel.clone().multiplyScalar(settings.throwBoost);
   if (tv.length() > 2.6 && state !== 'setup') { launch(w, tv, h.angVel); return; } // im Schwung losgelassen = Wurf
   makeLooseW(w, h.vel.clone(), h.angVel.clone());
@@ -1329,8 +1368,9 @@ function meleeUpdate(w, dt, h) {
   const axis = s.tip.clone().sub(s.base).normalize();
   const along = w.tipVel.dot(axis), baseAlong = w.baseVel.dot(axis);
   // Bewegung entlang der Klinge/des Schafts = Stich (nur Klingen und Speer)
-  const thrust = (kind === 'blade' || kind === 'spear') && along > 0.9 && baseAlong > 0.6 && along > w.tipSpeed * 0.72;
-  if (!thrust && w.tipSpeed < M.minSpeed) return; // langsames Hineinhalten zählt nicht
+  const easy = M.thrustEasy ? 0.7 : 1; // Rapier: schon kleine Stoßbewegungen zählen als Stich
+  const thrust = (kind === 'blade' || kind === 'spear') && along > 0.9 * easy && baseAlong > 0.6 * easy && along > w.tipSpeed * 0.72 * easy;
+  if (!thrust && w.tipSpeed < M.minSpeed) { bindUpdate(w, s, dt, h); return; } // langsam: vielleicht Klinge an Klinge drücken
   // Bahn seit dem letzten Bild in kleinen Schritten prüfen (kontinuierliche Kollision: schnelle Hiebe gehen nicht hindurch)
   // Zwischenstellungen auf dem Bogen um die Hand (nicht geradlinig) – sonst „schneidet“ ein schneller Hieb die Kurve ab
   const piv0 = w.prevPiv || w.root.position, piv1 = w.root.position;
@@ -1353,7 +1393,7 @@ function meleeUpdate(w, dt, h) {
   const two = w.twoHand ? 1 : 0, grip = w.def.needTwo && !two ? 0.6 : 1; // Kriegshammer einhändig: schwach
   const tired = player.stam < 15 ? 0.75 : 1;                            // erschöpft: schwächere Treffer
   const sp = clamp(cSpeed / 3.2, 0.3, 1.7);
-  let type, power, flat = false;
+  let type, power, flat = false, pen = M.kind === 'blade' && !M.thrustEasy ? 0 : M.pen || 0;
   if (thrust) { type = 'thrust'; power = M.thrust * clamp(along / 1.8, 0.6, 1.6) * (1 + 0.2 * two); }
   else if (kind === 'blunt') { type = 'blunt'; power = M.blunt * sp * (1 + 0.25 * two) * grip; }
   else if (kind === 'spear') { type = 'slash'; power = M.slash * sp; } // quer mit der Speerspitze: schwach
@@ -1367,20 +1407,61 @@ function meleeUpdate(w, dt, h) {
     if (kind === 'blade') power *= 0.35 + 0.65 * Math.min(1, u / 0.6); // Hebel: am Klingenansatz (Forte) schneidet es kaum, im vorderen Drittel voll
   }
   power *= tired;
+  if (type === 'slash' && M.cut) power *= M.cut;                 // Säbel: besonders gute Schneide
+  if (w.def.oneHandWeak && !w.twoHand) power *= 0.6;              // Zweihänder einhändig: Notführung
+  if (thrust && M.pen) pen = M.pen;
   const dir = (cSpeed > 0.1 ? _cv.clone() : w.tipVel.clone()).normalize();
   if (hit.kind !== 'body') { // Schild oder Waffe des Gegners im Weg: der Schwung ist abgefangen
     w.swingBlocked = true;
     enemyBlocked(hit, h, (M.shield || 3) * sp, power, dir, w);
-    kickWeapon(w, 0.3);
+    stopWeapon(w); kickWeapon(w, 0.2);
     return;
   }
   w.swingHits.add(hit.e);
-  const r = applyHit(hit.e, hit.zone, { type, power, pen: flat ? 0 : M.pen || 0, knockdown: !!M.knock && !!two && sp > 0.85, dir, point: hit.point, knock: w.def.mass > 1.3 ? 1.2 : 0.5 });
+  const r = applyHit(hit.e, hit.zone, { type, power, pen: flat ? 0 : pen, knockdown: !!M.knock && !!two && sp > 0.85, dir, point: hit.point, knock: w.def.mass > 1.3 ? 1.2 : 0.5 });
   onEnemyHit(hit, r, { type, flat });
   kickWeapon(w, r.armor ? 0.22 : 0.08);
   if (h) pulse(h, r.killed ? 1 : r.armor ? 0.9 : 0.4 + 0.4 * sp / 1.7, r.killed ? 100 : 55);
   if (w.second) pulse(w.second, 0.6, 50);
   useStamina(power > 30 ? 4 : 2);
+}
+// Bindung: Klinge liegt an der gegnerischen Waffe und wird langsam gedrückt → seine Deckung wird mitgeschoben
+function bindUpdate(w, s, dt, h) {
+  if (!s || w.def.melee.kind === 'blunt' || w.tipSpeed < 0.15 || dt <= 0) return;
+  const b = bindTest(s.base, s.tip);
+  if (!b) { w.binding = null; return; }
+  if (!w.binding) { w.binding = b.e; SFX.click(2600, 0.25, 0.05); if (h) pulse(h, 0.4, 30); } // Klingen berühren sich
+  const push = w.tipVel.clone().multiplyScalar(dt * (w.twoHand ? 1.4 : 1));
+  if ((frameNo & 3) === 0 && h) pulse(h, 0.15, 15);
+  if (bindPush(b.e, push, dt) === 'beaten') { SFX.clang(); if (h) pulse(h, 0.8, 60); teamOpening(null); }
+}
+// Morgenstern: die Kugel trifft, wenn sie schnell genug schwingt – auch über den Rand von Schilden hinweg
+function flailUpdate(w, dt, h) {
+  const seg = updateChain(w, dt, scene);
+  if (!seg || !(w.holder || w.desk) || state === 'setup' || dt <= 0) return;
+  const F = w.def.flail, speed = seg.a.distanceTo(seg.b) / dt;
+  w.flailSpeed = speed;
+  w.ballSlow = speed < 1.5 ? (w.ballSlow || 0) + dt : 0;
+  if (w.ballSlow > 0.15 || !w.ballHits) w.ballHits = new Set();
+  if (speed < F.minSpeed || speed > 30) return;
+  if (speed > F.minSpeed * 1.4 && !w.ballWhoosh) { w.ballWhoosh = true; SFX.whoosh(); } else if (speed < F.minSpeed) w.ballWhoosh = false;
+  const hit = strikeTest(seg.a, seg.b, F.ballR + 0.015, true);
+  if (!hit || w.ballHits.has(hit.e)) return;
+  w.ballHits.add(hit.e);
+  const dir = seg.b.clone().sub(seg.a).normalize(), power = F.blunt * clamp(speed / 6, 0.4, 1.7) * (player.stam < 15 ? 0.75 : 1);
+  if (hit.kind === 'shield') { // schlägt über den Rand: Schild nimmt Schaden, dahinter trifft es gedämpft
+    enemyBlocked(hit, h, F.shield * clamp(speed / 6, 0.4, 1.5), power, dir, w);
+    const r = applyHit(hit.e, 'torso', { type: 'blunt', power: power * 0.5, pen: F.pen, dir, point: hit.point, knock: 1 });
+    onEnemyHit({ e: hit.e, zone: 'torso', point: hit.point }, r, { type: 'blunt' });
+    if (settings.popups && !r.killed) floatingText('Über den Schild!', hit.point.clone().add(new THREE.Vector3(0, 0.3, 0)), '#7dffa8');
+  } else if (hit.kind !== 'body') enemyBlocked(hit, h, 3, power, dir, w);
+  else {
+    const r = applyHit(hit.e, hit.zone, { type: 'blunt', power, pen: F.pen, dir, point: hit.point, knock: 1.4 });
+    onEnemyHit(hit, r, { type: 'blunt' });
+    // Kugel prallt ab
+    const C = w.chain, P = C.pts[C.n], Q = C.prev[C.n]; Q.lerp(P, 0.7);
+  }
+  if (h) pulse(h, 1, 70);
 }
 // Knaufschlag: Griffende kräftig nach hinten/vorne gestoßen trifft stumpf (Schwert, Dolch, Stielwaffen)
 const _pm = new THREE.Vector3();
@@ -1408,7 +1489,7 @@ const _fh = new THREE.Vector3();
 function freeHandUpdate(h, dt) {
   const prev = h.prevFist;
   h.prevFist = h.point.clone();
-  if (!prev || h.held || h.drawing || h.grip2 || h.pull || state === 'setup' || dt <= 0) return;
+  if (!prev || h.held || h.drawing || h.grip2 || h.pull || h.arrow || state === 'setup' || dt <= 0) return;
   const v = _fh.subVectors(h.point, prev).divideScalar(dt), speed = v.length();
   if (speed > 25) return;
   if (speed > 2.4) { // Faustschlag
@@ -1474,7 +1555,7 @@ function shieldUpdate(w, dt, h) {
   if (state === 'setup' || elapsed < w.bashUntil) return;
   const n = w.normal.clone().transformDirection(w.root.matrixWorld);
   const v = w.cVel.dot(n);
-  if (v < 1.6) return;
+  if (v < (w.def.shield.buckler ? 1.2 : 1.6)) return;
   for (const e of enemies) {
     if (e.state === 'dead') continue;
     const chest = e.torso.localToWorld(new THREE.Vector3(0, 0.3, 0));
@@ -1729,11 +1810,20 @@ function poseHeld(w, dt) {
   // Gewicht: schwere Waffen folgen der Drehung der Hand etwas träge (beidhändig doppelt so schnell)
   const wt = settings.weight * (w.def.melee ? 1 : 0.4);
   if (wt > 0 && w.smoothQ && dt > 0) {
-    const rate = 32 / (w.def.mass * wt) * (w.twoHand ? 2 : 1);
+    const mass = w.def.mass * (w.def.oneHandWeak && !w.twoHand ? 1.6 : 1);
+    const rate = 32 / (mass * wt) * (w.twoHand ? 2 : 1);
     w.smoothQ.slerp(_hq, 1 - Math.exp(-dt * rate));
   } else w.smoothQ = (w.smoothQ || new THREE.Quaternion()).copy(_hq);
   w.root.position.copy(_hp);
   w.root.quaternion.copy(w.smoothQ);
+  // Kontakt: trifft die Klinge Schild oder Waffe, bleibt sie dort kurz stehen und folgt der Hand dann federnd –
+  // die echte Hand bewegt sich frei weiter, nur die virtuelle Waffe wird begrenzt
+  if (w.contactT > 0 && w.contactQ) {
+    w.contactT = Math.max(0, w.contactT - dt);
+    const k = 1 - w.contactT / 0.18;
+    w.root.quaternion.copy(w.contactQ).slerp(w.smoothQ, k * k);
+    if (w.smoothQ) w.smoothQ.copy(w.root.quaternion);
+  }
   // zweite Hand: Schwert, Hammer, Speer beidhändig – die Waffe zeigt von der hinteren zur vorderen Hand
   if (w.second) {
     const d1 = tmpV.subVectors(h.point, w.second.point), len = d1.length();
@@ -1751,6 +1841,7 @@ function poseHeld(w, dt) {
   w.root.updateMatrixWorld(true);
 }
 const kickWeapon = (w, amt) => { if (w) { w.kickT = 0.16; w.kickAmt = amt; } };
+const stopWeapon = (w) => { if (w && w.holder) { w.contactQ = w.root.quaternion.clone(); w.contactT = 0.18; } };
 
 // ---- Schwung-Spur und Schwung-Geräusch --------------------------------------------------------------
 const TRAIL_N = 9;
@@ -1795,11 +1886,13 @@ const hideTrail = (w) => { if (w.trail) { w.trail.pts.length = 0; w.trail.mesh.v
 let frameNo = 0;
 function updateWeapons(dt) {
   frameNo++;
+  for (const w of arsenal) if (w.chain) flailUpdate(w, dt, w.holder);
   for (const w of arsenal) {
+    if (w.holstered) { hideTrail(w); continue; }
     if (w.floating) poseFloating(w, elapsed);
     else if (w.holder) {
       poseHeld(w, dt);
-      if (w.def.melee) { meleeUpdate(w, dt, w.holder); trailUpdate(w, w.holder); }
+      if (w.def.melee) { meleeUpdate(w, dt, w.holder); if (!w.chain) trailUpdate(w, w.holder); }
       else if (w.def.shield) shieldUpdate(w, dt, w.holder);
       continue;
     } else if (w.desk) deskWeaponUpdate(w, dt);
@@ -1808,7 +1901,17 @@ function updateWeapons(dt) {
     }
     hideTrail(w);
   }
-  for (const h of hands) { if (h.drawing) bowUpdate(h); if (h.src) freeHandUpdate(h, dt); }
+  for (const h of hands) {
+    if (h.arrow) { // Pfeil in der Hand: zeigt entlang des Controllers; nahe der Sehne wird er eingelegt
+      h.arrow.position.copy(h.point); h.arrow.quaternion.copy(h.quat);
+      const bw = otherHand(h).held;
+      if (bw && bw.def.bow && !bw.def.crossbow && h.point.distanceTo(bw.model.localToWorld(bw.nock.clone())) < 0.14) {
+        scene.remove(h.arrow); h.arrow = null; h.drawing = bw; bw.draw = 0; SFX.click(500, 0.3, 0.05); pulse(h, 0.5, 30); pulse(otherHand(h), 0.3, 20);
+      }
+    }
+    if (h.drawing) bowUpdate(h);
+    if (h.src) freeHandUpdate(h, dt);
+  }
   // Pull: Waffe fliegt per Laser + Griff-Taste in die Hand
   for (const h of hands) {
     if (!h.pull) continue;
@@ -1818,6 +1921,41 @@ function updateWeapons(dt) {
     w.floating = false;
     w.root.position.lerp(h.point, Math.min(1, dt * 9));
     if (w.root.position.distanceTo(h.point) < 0.15) { h.pull = null; takeWeapon(w, h); }
+  }
+}
+// Holster: Körper schätzen, Plätze hervorheben, wenn eine Hand mit passender Waffe (oder leer an einer belegten Stelle) nahe ist
+function updateHolsterState(dt) {
+  const pts = hands.filter(h => h.src).map(h => h.point);
+  getViewCamera().getWorldDirection(tmpV);
+  updateHolsters(holsters, dt, headPos, tmpV, pts, { height: settings.height, hipOffset: settings.hipOffset, quiver: settings.quiver, quiverSide: settings.leftHanded ? -1 : 1, show: true });
+  for (const S of Object.values(holsters.slots)) {
+    let hot = 0;
+    for (const h of hands) {
+      if (!h.src) continue;
+      const d = S.anchor.position.distanceTo(h.point);
+      if (S.def.kind === 'quiver') { if (settings.quiver && !h.held && !h.arrow && d < 0.3) hot = 1; continue; }
+      if (h.held && fits(S, h.held) && d < 0.35) hot = 1;
+      if (!h.held && S.weapon && d < 0.3) hot = 1;
+      // spürbares Einrasten: kurze Vibration beim Erreichen der Zone
+      const inZone = d < 0.19 && ((h.held && fits(S, h.held)) || (!h.held && (S.weapon || (S.def.kind === 'quiver' && settings.quiver))));
+      if (inZone && h.zone !== S.id) { h.zone = S.id; pulse(h, 0.35, 25); }
+      else if (!inZone && h.zone === S.id) h.zone = null;
+    }
+    S.hot = hot;
+  }
+}
+// Sicherheitszone: nähern sich Kopf oder Hände einer eingezeichneten Wand oder einem Möbelstück, leuchtet es rot auf
+// (die Linien sind nur ein Hinweis – sie schützen nicht vor dem echten Hindernis)
+function updateSafety(dt) {
+  const m = settings.safety;
+  const pts = [headPos, ...hands.filter(h => h.src).map(h => h.point)];
+  for (const s of room.surfaces) {
+    if (s.type === 'door' || s.type === 'window') continue;
+    let near = 9;
+    if (m > 0 && state !== 'setup') for (const p of pts) near = Math.min(near, surfaceDistance(s, p));
+    const k = m > 0 && near < m ? 1 - near / m : 0;
+    setWarn(s, k);
+    if (k > 0.6) for (const h of hands) if (h.src && surfaceDistance(s, h.point) < m * 0.4 && (frameNo & 7) === 0) pulse(h, 0.25, 20);
   }
 }
 // Waffen am Boden, die ein entwaffneter Gegner aufheben kann (nicht gehaltene, nicht fliegende)
@@ -1956,7 +2094,7 @@ function endRound(died) {
 // =============================================================================
 // Waffen-Menü (Untermenü): Waffe aussuchen → kommt in die Hand. Jederzeit über A/X bzw. Q.
 // =============================================================================
-const weaponPanel = new UIPanel(1.0, 0.86, 760);
+const weaponPanel = new UIPanel(1.0, 0.98, 760);
 weaponPanel.border = '#ffb347';
 weaponPanel.visible = false;
 let uiClickHand = null; // welche Hand gerade einen Knopf drückt (dorthin kommt die Waffe)
@@ -1976,28 +2114,37 @@ function closeWeaponMenu() {
 }
 function toggleWeaponMenu() { if (weaponPanel.visible) closeWeaponMenu(); else openWeaponMenu(); }
 function refreshWeaponMenu() {
-  const W = 760, T = ENEMY_TYPES[trainType];
+  const W = 760, T = ENEMY_TYPES[trainType], xr = renderer.xr.isPresenting;
   weaponPanel.set((ctx, w) => {
-    text(ctx, '🗡 Waffen-Menü', w / 2, 40, 40, '#fff', 'center', true);
-    text(ctx, renderer.xr.isPresenting ? 'Waffe anklicken → sie kommt in die Hand, mit der du klickst.' : 'Waffe anklicken → du hast sie in der Hand (Schild links).', w / 2, 84, 21, '#cfd8e3');
-    text(ctx, renderer.xr.isPresenting ? 'Loslassen: Griff-Taste drücken und loslassen · Menü auf/zu: A/X' : 'Menü auf/zu: Q · Waffen auch mit 1–9 und 0 · F = werfen', w / 2, 110, 19, '#9ad');
-    text(ctx, 'Übungsgegner – „Passiv“ steht still, „Duell“ kämpft gegen dich:', w / 2, 368, 19, '#9ad');
-    if (weaponMsg) text(ctx, weaponMsg, w / 2, 526, weaponMsg.length > 60 ? 16 : 20, '#7dffa8', 'center', true);
-    text(ctx, `${arsenal.length} Waffen · ${enemies.length} Gegner im Raum`, w - 24, 630, 17, '#6b7a90', 'right');
+    text(ctx, '🗡 Waffen-Menü', w / 2, 36, 38, '#fff', 'center', true);
+    text(ctx, xr ? 'Waffe anklicken → sie kommt in die Hand, mit der du klickst. Loslassen an Hüfte/Schulter = ins Holster.' : 'Waffe anklicken → du hast sie in der Hand (Schild links).', w / 2, 76, 17, '#cfd8e3');
+    text(ctx, xr ? 'Griff-Taste loslassen = fallen lassen · im Schwung loslassen = werfen · Menü: A/X' : 'Menü auf/zu: Q · Waffen auch mit 1–9, 0 · F = werfen', w / 2, 100, 17, '#9ad');
+    text(ctx, 'Übungsgegner – „Passiv“ steht still, „Duell“ kämpft gegen dich:', w / 2, 428, 18, '#9ad');
+    if (weaponMsg) text(ctx, weaponMsg, w / 2, 610, weaponMsg.length > 70 ? 14 : 17, '#7dffa8', 'center', true);
+    text(ctx, `${arsenal.length} Waffen · ${enemies.length} Gegner im Raum`, w - 24, 718, 15, '#6b7a90', 'right');
   }, [
-    ...[0, 1, 2].flatMap(r => row(132 + r * 74, 66, WEAPON_ORDER.slice(r * 4, r * 4 + 4).map(id => ({ id: 'w_' + id, label: `${WEAPONS[id].icon} ${WEAPONS[id].name}`, font: 19, onClick: () => pickWeapon(id) })), W, 24, 10)),
-    ...row(384, 54, [
-      { id: 'ttype', label: `◀ ${T.name} ▶`, font: 24, onClick: () => { trainType = TYPE_ORDER[(TYPE_ORDER.indexOf(trainType) + 1) % TYPE_ORDER.length]; weaponMsg = ''; refreshWeaponMenu(); } },
-      { id: 'dummy', label: '🎯 Passiv', font: 24, onClick: () => { spawnTrainer(true); weaponMsg = `${T.name} steht vor dir – wehrt sich nicht`; refreshWeaponMenu(); } },
-      { id: 'duel', label: '⚔ Duell', font: 24, onClick: () => { spawnTrainer(false); weaponMsg = `${T.name} fordert dich – Menü schließen, dann geht es los`; refreshWeaponMenu(); } }
+    ...[0, 1, 2, 3].flatMap(r => row(118 + r * 74, 64, WEAPON_ORDER.slice(r * 4, r * 4 + 4).map(id => ({ id: 'w_' + id, label: `${WEAPONS[id].icon} ${WEAPONS[id].name}`, font: 19, onClick: () => pickWeapon(id) })), W, 24, 10)),
+    ...row(442, 52, [
+      { id: 'ttype', label: `◀ ${T.name} ▶`, font: 23, onClick: () => { trainType = TYPE_ORDER[(TYPE_ORDER.indexOf(trainType) + 1) % TYPE_ORDER.length]; weaponMsg = ''; refreshWeaponMenu(); } },
+      { id: 'dummy', label: '🎯 Passiv', font: 23, onClick: () => { spawnTrainer(true); weaponMsg = `${T.name} steht vor dir – wehrt sich nicht`; refreshWeaponMenu(); } },
+      { id: 'duel', label: '⚔ Duell', font: 23, onClick: () => { spawnTrainer(false); weaponMsg = `${T.name} fordert dich – Menü schließen, dann geht es los`; refreshWeaponMenu(); } }
     ], W, 30, 12),
-    ...row(448, 50, [
-      { id: 'fetch', label: '🧲 Waffen herholen', font: 22, disabled: !arsenal.length, onClick: () => { placeOnRack(false); weaponMsg = 'Waffen schweben vor dir'; refreshWeaponMenu(); } },
-      { id: 'clearw', label: '🧹 Waffen weg', font: 22, disabled: !arsenal.length, onClick: () => { clearWeapons(); weaponMsg = 'Alle Waffen weggeräumt'; refreshWeaponMenu(); } },
-      { id: 'cleare', label: '🧹 Gegner weg', font: 22, disabled: !enemies.length || state === 'playing', onClick: () => { clearEnemies(); weaponMsg = 'Alle Gegner entfernt'; refreshWeaponMenu(); } }
+    ...row(504, 48, [
+      { id: 'loadout', label: '🎒 Ausrüstung anlegen', font: 20, disabled: !xr || !settings.holsters, onClick: () => { equipLoadout(); weaponMsg = 'Schwert linke Hüfte, Dolch rechte Hüfte, Schild und Bogen auf dem Rücken, Köcher'; refreshWeaponMenu(); } },
+      { id: 'fetch', label: '🧲 Waffen herholen', font: 20, disabled: !arsenal.length, onClick: () => { placeOnRack(false); weaponMsg = 'Waffen schweben vor dir'; refreshWeaponMenu(); } }
     ], W, 30, 12),
-    ...row(550, 56, [{ id: 'close', label: state === 'playing' ? '✔ Los geht’s' : '◀ Zurück', font: 30, onClick: closeWeaponMenu }], W, 230)
+    ...row(560, 40, [
+      { id: 'clearw', label: '🧹 Waffen weg', font: 19, disabled: !arsenal.length, onClick: () => { clearWeapons(); weaponMsg = 'Alle Waffen weggeräumt'; refreshWeaponMenu(); } },
+      { id: 'cleare', label: '🧹 Gegner weg', font: 19, disabled: !enemies.length || state === 'playing', onClick: () => { clearEnemies(); weaponMsg = 'Alle Gegner entfernt'; refreshWeaponMenu(); } }
+    ], W, 30, 12),
+    ...row(636, 58, [{ id: 'close', label: state === 'playing' ? '✔ Los geht’s' : '◀ Zurück', font: 30, onClick: closeWeaponMenu }], W, 230)
   ]);
+}
+// Standard-Ausrüstung in die Holster legen (Rechtshänder: Schwert links zum Ziehen über Kreuz)
+function equipLoadout() {
+  const L = settings.leftHanded;
+  const put = (id, slot) => { const S = holsters.slots[slot]; if (S.weapon) return; holster(newWeapon(id), S); };
+  put('sword', L ? 'hipR' : 'hipL'); put('dagger', L ? 'hipL' : 'hipR'); put('shield', 'backL'); put('bow', 'backR');
 }
 function pickWeapon(id) {
   const h = uiClickHand;
@@ -2062,7 +2209,7 @@ function deskAttack(thrust = false) {
   SFX.whoosh();
 }
 function deskStrike(w) { // Treffer-Moment des PC-Schwungs
-  const R = w.deskRay, M = w.def.melee, kind = M.kind;
+  const R = w.deskRay, M = w.def.flail ? { kind: 'blunt', blunt: w.def.flail.blunt, pen: w.def.flail.pen, shield: w.def.flail.shield } : w.def.melee, kind = M.kind;
   const hit = strikeTest(R.o.clone().addScaledVector(R.d, 0.25), R.o.clone().addScaledVector(R.d, w.def.reach), kind === 'blunt' || w.id === 'sword' ? 0.06 : 0.04, true);
   if (!hit) return;
   const thrust = kind === 'spear' || (kind === 'blade' && w.deskThrust);
@@ -2077,6 +2224,8 @@ function deskWeaponUpdate(w, dt) {
   if (w.def.shield) {
     if (deskGuard) { w.root.position.lerp(tmpV.set(-0.04, -0.17, -0.46), Math.min(1, dt * 18)); w.root.rotation.set(0, 0, 0); }
     else { w.root.position.lerp(tmpV.set(-0.42, -0.42, -0.62), Math.min(1, dt * 12)); w.root.rotation.set(0, 0.45, 0); }
+    // frisch gedrückte Leertaste = Schild dem Schlag entgegenstoßen (für Buckler und Schild-Parade)
+    if (deskGuard && elapsed - deskGuardT < 0.3) w.cVel.set(0, 0, -1.6).transformDirection(w.root.matrixWorld).multiplyScalar(1.6); else w.cVel.set(0, 0, 0);
   } else if (w.def.melee) {
     if (w.deskHitT > 0) { w.deskHitT -= dt; if (w.deskHitT <= 0) deskStrike(w); }
     if (w.deskSwing > 0) {
@@ -2353,6 +2502,7 @@ renderer.setAnimationLoop(() => {
   }
 });
 // Messung der Rechenzeit (für Tests und die Leistungsanzeige): js = Spiel-Logik, parts = einzelne Bereiche
+let trackLostT = 0;
 const prof = { js: 0, n: 0, max: 0, parts: {}, lastDt: 0 };
 const timed = (name, fn) => { const t = performance.now(); fn(); prof.parts[name] = (prof.parts[name] || 0) + performance.now() - t; };
 function frameInner() {
@@ -2387,13 +2537,21 @@ function frameInner() {
   if (xr) {
     readInputs();
     if (state === 'playing' && hands.some(h => h.src && pauseButton(h))) { setPaused(true); pauseFrame(true); return; }
+    // Schutz bei Tracking-Verlust: Brille verliert die Position oder beide Controller sind weg → Pause
+    const xf = renderer.xr.getFrame && renderer.xr.getFrame(), pose = xf && baseRefSpace ? xf.getViewerPose(renderer.xr.getReferenceSpace()) : true;
+    const srcs = hands.filter(h => h.src);
+    const lost = !pose || pose.emulatedPosition === true || (srcs.length > 0 && srcs.every(h => !h.ray.visible && !h.grip.visible));
+    trackLostT = lost ? trackLostT + rawDt : 0;
+    if (state === 'playing' && trackLostT > 0.6) { trackLostT = 0; setPaused(true); floatingText('Tracking verloren – Pause', inFront(1, 0, headPos.y), '#ff8a7a'); pauseFrame(true); return; }
     // Bedienfelder folgen, wenn man sich weit entfernt
     for (const p of [setupPanel, menuPanel]) if (p.visible && headPos.distanceTo(p.anchor) > 1.3) p === menuPanel ? enterMenu() : p.place(0.85, 0.65, -0.4);
     updateHandsXR(dt);
   }
   if (state === 'setup') updateSetup(dt);
   timed('physik', () => stepPhysics(dt));
+  if (xr && settings.holsters) updateHolsterState(dt);
   timed('waffen', () => { updateWeapons(dt); updateFlying(dt); });
+  if (xr) updateSafety(dt);
   timed('gegner', () => updateGame(dt));
   updateDust(dt);
   updateAtmosphere(dt);
@@ -2413,7 +2571,7 @@ applySettings();
 window.__cam = camera;
 window.__game = {
   prof,
-  renderer, room, hands, enemies, arsenal, uiPanels, get playerHp() { return playerHp; }, set playerHp(v) { playerHp = v; }, get kills() { return kills; }, placeOnRack, equipDesk, giveWeapon, openWeaponMenu, closeWeaponMenu, get weaponPanel() { return weaponPanel; }, deskAttack, spawnTrainer, player, combatOpts, take: (id, i) => { const w = newWeapon(id); takeWeapon(w, hands[i]); return w; }, get roundT() { return roundT; }, set roundT(v) { roundT = v; }, spawn: (type, at, passive) => spawnEnemy(headPos, { type, at, passive }), set trainType(v) { trainType = v; }, teleport: (x, z) => { camera.position.x = x; camera.position.z = z; }, settings, setup, menuPanel, setupPanel, pausePanel,
+  renderer, room, hands, enemies, arsenal, uiPanels, get playerHp() { return playerHp; }, set playerHp(v) { playerHp = v; }, get kills() { return kills; }, placeOnRack, equipDesk, giveWeapon, openWeaponMenu, closeWeaponMenu, get weaponPanel() { return weaponPanel; }, deskAttack, spawnTrainer, player, combatOpts, enemyWeaponSeg, segSegDist: (a, b, c, d) => segSeg(a, b, c, d), holsters, holster, equipLoadout, updateHolsterState, updateSafety, releaseHand, takeWeapon, take: (id, i) => { const w = newWeapon(id); takeWeapon(w, hands[i]); return w; }, get roundT() { return roundT; }, set roundT(v) { roundT = v; }, spawn: (type, at, passive) => spawnEnemy(headPos, { type, at, passive }), set trainType(v) { trainType = v; }, teleport: (x, z) => { camera.position.x = x; camera.position.z = z; }, settings, setup, menuPanel, setupPanel, pausePanel,
   get state() { return state; }, get paused() { return paused; }, get errors() { return errorCount; }, get floorOffset() { return floorOffset; },
   startPressed, enterMenu, enterSetup, finishSetup, setPaused, spawnEnemy: () => spawnEnemy(headPos), setTool, setupTriggerDown, setupTriggerUp,
   alignToLine, loadSlot, saveSlot, serializeRoom, surfaceAt, updateSetup

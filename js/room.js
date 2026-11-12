@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { addStaticBox, removeStatic } from './physics.js?v=10';
-import { mergeStatic } from './util.js?v=10';
+import { addStaticBox, removeStatic } from './physics.js?v=11';
+import { mergeStatic } from './util.js?v=11';
 
 // Raum-Modell: echte Wände, Tische und Stühle des Spielers.
 // Jede Fläche bekommt eine sichtbare Vorschau (im Einrichtungsmodus), einen unsichtbaren
@@ -525,3 +525,33 @@ export function closeRoom() {
   return n;
 }
 export const openWallEnds = () => freeEnds(wallEndsInfo()).length;
+
+// ---- Sicherheitszone ---------------------------------------------------------------------------
+// waagrechter Abstand eines Punktes zu einer Wand bzw. einem Möbelstück (Tisch/Stuhl: bis zu dessen Höhe)
+const _sp = new THREE.Vector3();
+export function surfaceDistance(s, p) {
+  if (s.type === 'wall') {
+    const u = (p.x - s.a.x) * s.right.x + (p.z - s.a.z) * s.right.z;
+    const d = Math.abs((p.x - s.a.x) * s.normal.x + (p.z - s.a.z) * s.normal.z);
+    const out = u < 0 ? -u : u > s.width ? u - s.width : 0;
+    return Math.hypot(d, out);
+  }
+  if (!s.X) return 9;
+  const dx = p.x - s.center.x, dz = p.z - s.center.z;
+  const lx = Math.max(0, Math.abs(dx * s.X.x + dz * s.X.z) - s.hx), lz = Math.max(0, Math.abs(dx * s.Z.x + dz * s.Z.z) - s.hz);
+  const ly = Math.max(0, p.y - s.height - 0.1); // über dem Tisch: kein Anstoßen
+  return Math.hypot(lx, lz, ly);
+}
+// k = 0 (aus) … 1 (sehr nah): Fläche wird rot sichtbar
+export function setWarn(s, k) {
+  if (!s.visual || room.edit) return;
+  if (k <= 0.01) {
+    if (s._warn) { s._warn = 0; s.visual.material.color.setHex(s._col); s.visual.material.opacity = s._op; applyMode(s); }
+    return;
+  }
+  if (!s._warn) { s._col = s.visual.material.color.getHex(); s._op = s.visual.material.opacity; }
+  s._warn = k;
+  s.visual.visible = true; s.edges.visible = true;
+  s.visual.material.color.setHex(0xff2a1a);
+  s.visual.material.opacity = 0.12 + 0.45 * k;
+}

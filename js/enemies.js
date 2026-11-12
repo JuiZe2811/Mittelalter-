@@ -1,11 +1,11 @@
 import * as THREE from 'three';
-import { surfacesOf, roomOccluders } from './room.js?v=10';
-import { buildNav, findPath, walkable, nearestWalkable, groundAt, STEP } from './nav.js?v=10';
-import { SFX, SFX3D } from './sfx.js?v=10';
-import { puff, addDebris, burst, sparks, floorDecal, floatingText } from './effects.js?v=10';
-import { segSeg, segPoint, segDisc, slerpDir } from './geom.js?v=10';
-import { makeArrowMesh, ARROW_LEN } from './arrow.js?v=10';
-import { HIP, SH_X, SH_Y, L1, L2, THIGH, SHIN, REACH, ENEMY_TYPES, TYPE_ORDER, ATK, EW, PARRY, SHIELD_POSE, SHIELD_R, SHIELD_HP, STANCES, bloodMat, buildFighter, makeWeapon, makeShield, makeBlob, warmFaces } from './fighter.js?v=10';
+import { surfacesOf, roomOccluders } from './room.js?v=11';
+import { buildNav, findPath, walkable, nearestWalkable, groundAt, STEP } from './nav.js?v=11';
+import { SFX, SFX3D } from './sfx.js?v=11';
+import { puff, addDebris, burst, sparks, floorDecal, floatingText } from './effects.js?v=11';
+import { segSeg, segPoint, segDisc, slerpDir } from './geom.js?v=11';
+import { makeArrowMesh, ARROW_LEN } from './arrow.js?v=11';
+import { HIP, SH_X, SH_Y, L1, L2, THIGH, SHIN, REACH, ENEMY_TYPES, TYPE_ORDER, ATK, EW, PARRY, SHIELD_POSE, SHIELD_R, SHIELD_HP, STANCES, bloodMat, buildFighter, makeWeapon, makeShield, makeBlob, warmFaces } from './fighter.js?v=11';
 
 // =============================================================================
 // Gegner: menschliche Kämpfer mit echtem Kampfverhalten.
@@ -380,6 +380,32 @@ export function pushEnemy(e, dir, amount) {
   e.bal -= amount * 60; e.balT = 1.2;
   if (e.bal <= 0) { e.bal = e.T.balance * 0.6; e.stagger = Math.max(e.stagger, 0.9); e.act = null; note(e, 'weggestoßen'); }
 }
+// Bindung: die Klinge des Spielers liegt an der Waffe des Gegners (langsam, kein Hieb).
+// Liefert den Gegner, an dessen Waffe a→b liegt, oder null.
+export function enemyWeaponSeg(e, a, b) { weaponSeg(e, e.wdef.haft, a, b); return e.weapon ? true : false; }
+export function bindTest(a, b) {
+  for (const e of enemies) {
+    if (e.state !== 'fight' || !e.weapon || e.weaponId === 'bow' || e.weaponId === 'fist' || e.down) continue;
+    weaponSeg(e, e.wdef.haft, _ha, _hb);
+    if (segSeg(a, b, _ha, _hb, _c1) < 0.07) return { e, point: _c1.clone() };
+  }
+  return null;
+}
+// Druck in der Bindung: die gegnerische Klinge wird mitgeschoben; wer stärker drückt, öffnet die Deckung.
+// push = Welt-Verschiebung der Spielerklinge in diesem Bild. Liefert 'beaten', wenn die Deckung aufgeht.
+export function bindPush(e, push, dt) {
+  const L = t3.copy(push).applyQuaternion(q1.copy(e.root.quaternion).invert()).divideScalar(e.scale);
+  const resist = (e.wdef.twoH ? 1.4 : 1) * (0.4 + e.stam / 100) * (e.hurt[zoneOfArm(wArm(e))] ? 0.6 : 1);
+  // die gegnerische Klinge gibt nach (bleibender Versatz, klingt langsam ab) – wer stärker ist, drückt sie weg
+  if (!e.bindOff) e.bindOff = new THREE.Vector3();
+  e.bindOff.addScaledVector(L, Math.min(1, 0.9 / resist));
+  e.wp.hp.addScaledVector(L, Math.min(1, 0.9 / resist));
+  e.bind = e.bindOff.length();
+  e.stam = Math.max(0, e.stam - push.length() * 40);
+  e.act = null; e.queue.length = 0; e.cool = Math.max(e.cool, 0.25); // in der Bindung greift er nicht an
+  if (e.bind > 0.2) { e.bind = 0; e.bindOff.set(0, 0, 0); e.beaten = 0.7; e.bal -= 12; note(e, 'Deckung aufgedrückt!', '#7dffa8'); return 'beaten'; }
+  return null;
+}
 // Treffer auf den Schild eines Gegners: Äxte und Hämmer zerschlagen ihn. Liefert true, wenn er zerbricht.
 export function hitShield(e, dmg, point) {
   if (!e.shield) return false;
@@ -691,9 +717,11 @@ function resolveBlock(e, act, how, obj, point) {
     startRecoil(e, act, active ? 0.95 : 0.45);
     if (active) parried(e, perfect);
   } else {
-    if (player.stam < 8) { if (!act.weak) { act.weak = 0.5; player.blocked({ how: 'weak', point: point.clone(), e, w: obj.w }); } return false; } // erschöpft: Schild wird weggedrückt
+    const buckler = !!(obj.w && obj.w.def.shield && obj.w.def.shield.buckler);
+    const bash = obj.w && obj.w.cVel && obj.w.cVel.dot(obj.n) > (buckler ? 0.6 : 1.0); // Schild dem Schlag entgegengestoßen
+    // erschöpft: Schild wird weggedrückt · Buckler nur hingehalten: der Schlag rutscht ab und trifft gedämpft
+    if (player.stam < 8 || (buckler && !bash)) { if (!act.weak) { act.weak = buckler ? 0.55 : 0.5; player.blocked({ how: 'weak', point: point.clone(), e, w: obj.w }); } return false; }
     act.done = true;
-    const bash = obj.w && obj.w.cVel && obj.w.cVel.dot(obj.n) > 1.0; // Schild dem Schlag entgegengestoßen
     player.blocked({ how: 'shield', perfect: bash, point: point.clone(), e, w: obj.w, heavy, power: e.wdef.dmg });
     startRecoil(e, act, heavy ? 0.42 : bash ? 1.0 : 0.6);
     if (bash) parried(e, false);
@@ -816,6 +844,7 @@ function guardPose(e, dt, low = 0) {
   } else {
     const G = e.stance && e.fighting && !low && (e.weaponId === 'sword' || e.weaponId === 'mace') ? STANCES[e.stance] : w.guard;
     toLocalPos(e, G.hp, t1); toLocalDir(e, G.bd, t2);
+    if (e.bindOff) t1.add(e.bindOff); // in der Bindung weggedrückt
     if (!e.fighting || low) { const k = low || 1; t1.y -= 0.22 * k; t1.z -= 0.08 * k; t2.y -= 0.5 * k; t2.normalize(); } // Waffe gesenkt
   }
   e.wp.hp.lerp(t1, Math.min(1, dt * rate));
@@ -982,6 +1011,7 @@ function fight(e, dt) {
   e.balT -= dt;
   if (e.balT <= 0) e.bal = Math.min(e.T.balance, e.bal + dt * 25);
   if (!e.act) e.stam = Math.min(100, e.stam + dt * (e.token ? 10 : 18));
+  if (e.bindOff) e.bindOff.multiplyScalar(Math.exp(-dt * 1.2)); // er drückt langsam zurück in seine Deckung
   if (e.beaten > 0) { e.beaten -= dt; guardPose(e, dt, 0.5); return; } // Deckung weggeschlagen: kurz offen
   if (e.rearm && !e.down && e.stagger <= 0 && !e.passive && rearm(e, dt, d)) return;
   if (e.down) { // am Boden: fällt, liegt (wehrlos), rappelt sich wieder auf

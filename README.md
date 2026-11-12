@@ -64,7 +64,13 @@ Das Ziel wird am Ende des Ausholens festgelegt. Wer rechtzeitig zurückweicht, z
 | 🔱 Speer | Stich, große Reichweite | Gambeson, Kette; hält Gegner auf Abstand | Platte, Schilde |
 | 🏹 Bogen | Pfeile | leichte Rüstung | Schilde fangen Pfeile ab, Platte |
 | 🎯 Armbrust | Bolzen mit Durchschlag | auch Kette und Platte | langsames Spannen |
+| 🗡 Kurzschwert | Hieb und Stich, wendig | Ungepanzerte; ideal paarweise oder mit Buckler | Platte |
+| 🌙 Säbel | gebogene Klinge, Hieb | Stoff, Leder (Schneide ×1,2) | Stich, Kette, Platte |
+| 🤺 Rapier | Stich | schon kleine Stöße zählen, Stiche gehen teils durch Rüstung | Hiebe kaum wirksam |
+| ⚔ Zweihänder | Hieb und Stich, beidhändig | größte Reichweite, wuchtig | einhändig träge und schwach (×0,6) |
+| ⛓ Morgenstern | Kugel an einer simulierten Kette | schlägt über den Rand von Schilden | Schwung nötig |
 | 🛡 Schild | Block, Schildstoß | | |
+| 🔘 Buckler | kleiner Faustschild | perfekte Ablenkung, wenn dem Schlag entgegengestoßen | nur gehalten rutschen Schläge durch |
 | 🪨 Stein | zum Werfen | Ungepanzerte, am Kopf betäubend | Rüstung |
 
 So wirken sie:
@@ -118,6 +124,27 @@ Alles, was du in der Hand hältst, kannst du werfen: Lass es mitten im Schwung l
 - **Waffen der Gegner:** Lässt ein Gegner seine Waffe oder seinen Schild fallen (entwaffnet, Arm unbrauchbar, tot), liegt sie als echte Waffe am Boden. Du kannst sie aufheben, benutzen und werfen.
   - Keule wird zum Streitkolben, Hellebarde zum Speer.
 
+### Holster, Köcher und Greifen
+
+**Holster** (Einstellungen → 🎒 Körper):
+- Plätze: linke und rechte Hüfte, Rücken über beiden Schultern, Köcher.
+- **Einstecken:** Waffe an einen passenden Platz halten und loslassen. Der Platz leuchtet auf, und der Controller vibriert kurz.
+- **Ziehen:** Hingreifen und die Griff-Taste drücken.
+- **Was wohin passt:** An die Hüfte passen kleine und mittlere Waffen, auf den Rücken alles.
+- **Körper-Schätzung:** Der Körper wird aus Kopf und Händen geschätzt. Kleine Kopfdrehungen bewegen die Holster nicht mit.
+  - Körpergröße und Hüftposition sind einstellbar.
+  - Für Linkshänder sitzt der Köcher links.
+- **🎒 Ausrüstung anlegen** (Waffen-Menü): Schwert linke Hüfte, Dolch rechte Hüfte, Schild und Bogen auf dem Rücken.
+
+**Köcher:**
+- Ist „Pfeile aus dem Köcher ziehen“ an: Hinter die Schulter greifen, Pfeil ziehen, an die Sehne führen (er rastet ein), ziehen, loslassen.
+- Aus (bequem für kleine Räume): Wie bisher die Sehne direkt greifen.
+
+**Greifen:**
+- Übergabe: Hält eine Hand eine Waffe, kann die andere sie am Griff übernehmen.
+- Zwei Waffen gleichzeitig führen (zwei Kurzschwerter, Rapier und Dolch, Schwert und Buckler …) funktioniert unabhängig voneinander.
+- Zweihänder, Speer und Hammer kannst du an Griff, Schaft oder Klinge mit der zweiten Hand fassen.
+
 ### Kampfsystem: Treffer, Paraden, Gleichgewicht
 
 **Treffer**
@@ -133,6 +160,14 @@ Alles, was du in der Hand hältst, kannst du werfen: Lass es mitten im Schwung l
 - **Freie Hand:**
   - Ein schneller Faustschlag trifft stumpf.
   - Langsam gegen den Rumpf eines Gegners gedrückt schiebt sie ihn weg und kostet ihn Gleichgewicht.
+
+**Bindung (Druck Klinge an Klinge)**
+- Liegt deine Klinge an der Waffe des Gegners, spürst du ein Klicken und leichtes Vibrieren.
+- Langsames seitliches Drücken schiebt seine Klinge mit. Er drückt zurück, Zweihänder und frische Gegner stärker.
+- Hast du sie weit genug weggedrückt (etwa 20 cm), geht seine Deckung auf.
+- Solange ihr gebunden seid, greift er nicht an.
+
+**Kontakt:** Trifft deine Klinge Schild oder Waffe, bleibt die virtuelle Klinge einen Moment stehen und folgt dann federnd deiner Hand. Die echte Hand bleibt frei.
 
 **Klinge an Klinge**
 - Die Waffe des Gegners ist immer im Weg, nicht nur wenn er pariert.
@@ -257,6 +292,14 @@ Es gibt nur normale menschliche Gegner, keine Bosse und keine Riesen.
 
 Solange das Waffen-Menü offen ist, steht alles still.
 
+## Sicherheit im echten Zimmer
+
+- **Sicherheitsabstand** (Einstellungen → 🎒 Körper; 30, 50 oder 80 cm):
+  - Kommen Kopf oder Hände einer eingezeichneten Wand, einem Tisch oder Stuhl zu nahe, leuchtet die Fläche rot auf.
+  - Sehr nah vibriert der Controller.
+  - Die rote Fläche ist nur ein Hinweis, kein Schutz: Sie warnt nur vor dem, was du eingezeichnet hast.
+- **Pause bei Tracking-Verlust:** Verliert die Brille ihre Position oder beide Controller, pausiert die Runde.
+
 ## Flüssiges Bild
 
 In VR fühlt sich die Kopfbewegung nur dann flüssig an, wenn jedes Bild rechtzeitig fertig wird.
@@ -281,7 +324,7 @@ Im Reiter **⚔ Kampf**:
 | rechte Maus ziehen | umschauen |
 | WASD | gehen, auch auf den Tisch hinauf |
 | Q | Waffen-Menü |
-| 1–9, 0 | Dolch, Schwert, Streitkolben, Axt, Hammer, Speer, Bogen, Armbrust, Schild, Stein |
+| 1–9, 0 | die ersten zehn Waffen im Waffen-Menü; alle über Q |
 | Linksklick | Hieb oder Schlag dorthin, wo das Fadenkreuz zeigt; Bogen: halten = spannen; Armbrust: erst spannen, dann schießen |
 | E | Stich |
 | Leertaste | Deckung: Schild vor den Körper bzw. Klinge quer über den Kopf |

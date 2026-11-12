@@ -1,9 +1,9 @@
 import * as THREE from 'three';
-import { strikeTest, applyHit, boneOf } from './enemies.js?v=10';
-import { roomOccluders } from './room.js?v=10';
-import { SFX } from './sfx.js?v=10';
-import { sparks, puff } from './effects.js?v=10';
-import { makeArrowMesh, ARROW_LEN } from './arrow.js?v=10';
+import { strikeTest, applyHit, boneOf } from './enemies.js?v=11';
+import { roomOccluders } from './room.js?v=11';
+import { SFX } from './sfx.js?v=11';
+import { sparks, puff } from './effects.js?v=11';
+import { makeArrowMesh, ARROW_LEN } from './arrow.js?v=11';
 export { makeArrowMesh };
 
 // =============================================================================
@@ -13,7 +13,7 @@ export { makeArrowMesh };
 // Schneide wirken voll, mit der flachen Seite nur halb. Stiche (Bewegung entlang der Klinge) zählen
 // eigens – sie gehen besser durch Rüstung.
 // =============================================================================
-export const WEAPON_ORDER = ['dagger', 'sword', 'mace', 'axe', 'hammer', 'spear', 'bow', 'crossbow', 'shield', 'stone'];
+export const WEAPON_ORDER = ['dagger', 'shortsword', 'sword', 'sabre', 'rapier', 'greatsword', 'mace', 'morningstar', 'axe', 'hammer', 'spear', 'bow', 'crossbow', 'shield', 'buckler', 'stone'];
 // melee.kind: blade (Hieb + Stich) · blunt (stumpf) · axe (Hieb mit Durchschlag) · spear (Stich)
 // pen = Durchschlag: Anteil der Rüstung, der ignoriert wird · shield = Schaden an gegnerischen Schilden
 export const WEAPONS = {
@@ -21,8 +21,18 @@ export const WEAPONS = {
     thrown: { point: true, type: 'thrust', power: 38 }, tip: 'Dolch: schneller Stich – gut gegen Stoff, Gambeson und Kette; im Schwung loslassen = Wurf, bleibt stecken' },
   sword: { name: 'Langschwert', icon: '⚔', melee: { kind: 'blade', slash: 40, thrust: 34, minSpeed: 1.6, base: 0.06, len: 0.88, shield: 4 }, twoHand: true, mass: 1.4, reach: 1.75,
     thrown: { type: 'slash', power: 24 }, tip: 'Langschwert: Hieb gegen Ungepanzerte, Stich gegen Gambeson/Kette – an Platte gleitet es ab' },
+  shortsword: { name: 'Kurzschwert', icon: '🗡', melee: { kind: 'blade', slash: 30, thrust: 30, minSpeed: 1.4, base: 0.05, len: 0.6, shield: 3 }, mass: 1.0, reach: 1.4, slot: 'hip',
+    thrown: { type: 'slash', power: 20 }, tip: 'Kurzschwert: wendig, ideal in jeder Hand eines – zwei Kurzschwerter oder mit Buckler' },
+  sabre: { name: 'Säbel', icon: '🌙', melee: { kind: 'blade', slash: 48, thrust: 18, minSpeed: 1.4, base: 0.06, len: 0.8, shield: 3, cut: 1.2 }, mass: 1.2, reach: 1.6, slot: 'hip',
+    thrown: { type: 'slash', power: 22 }, tip: 'Säbel: gebogene Klinge, schneidet besonders gut gegen Stoff und Leder – schwach im Stich und an Kette/Platte' },
+  rapier: { name: 'Rapier', icon: '🤺', melee: { kind: 'blade', slash: 12, thrust: 44, pen: 0.12, minSpeed: 1.2, base: 0.06, len: 1.0, shield: 1, thrustEasy: true }, mass: 1.0, reach: 1.9, slot: 'hip',
+    thrown: { type: 'slash', power: 12 }, tip: 'Rapier: blitzschnelle, präzise Stiche (auch in Lücken der Rüstung), kleine Paraden – Hiebe kaum wirksam' },
+  greatsword: { name: 'Zweihänder', icon: '⚔', melee: { kind: 'blade', slash: 60, thrust: 40, minSpeed: 1.5, base: 0.08, len: 1.2, shield: 12 }, twoHand: true, oneHandWeak: true, mass: 3.0, reach: 2.2, slot: 'back',
+    thrown: { type: 'slash', power: 30 }, tip: 'Zweihänder: mit beiden Händen führen (hinten am langen Griff fassen) – riesige Reichweite, wuchtige Hiebe; einhändig träge und schwach' },
   mace: { name: 'Streitkolben', icon: '🔨', melee: { kind: 'blunt', blunt: 34, minSpeed: 1.5, shield: 10 }, mass: 1.6, reach: 1.45,
     thrown: { type: 'blunt', power: 30, shield: 8 }, tip: 'Streitkolben: stumpfe Wucht – wirkt durch Kette und Platte, betäubt am Helm' },
+  morningstar: { name: 'Morgenstern', icon: '⛓', melee: { kind: 'blunt', blunt: 8, minSpeed: 2.2, shield: 2 }, flail: { blunt: 46, pen: 0.2, chain: 0.4, ballR: 0.055, minSpeed: 3.2, shield: 14 }, mass: 1.8, reach: 1.5, slot: 'hip',
+    thrown: { type: 'blunt', power: 30, shield: 10 }, tip: 'Morgenstern: Kugel an der Kette – Schwung holen! Schlägt über den Rand von Schilden hinweg' },
   axe: { name: 'Streitaxt', icon: '🪓', melee: { kind: 'axe', slash: 48, pen: 0.3, minSpeed: 1.6, shield: 28 }, mass: 1.8, reach: 1.5,
     thrown: { type: 'slash', power: 42, pen: 0.25, shield: 22, stick: 0.5 }, tip: 'Streitaxt: schwerer Hieb, schlägt teils durch Rüstung und zertrümmert Schilde' },
   hammer: { name: 'Kriegshammer', icon: '⚒', melee: { kind: 'blunt', blunt: 52, pen: 0.25, minSpeed: 1.5, shield: 22, knock: true }, twoHand: true, needTwo: true, mass: 3, reach: 1.8,
@@ -32,9 +42,13 @@ export const WEAPONS = {
   bow: { name: 'Bogen', icon: '🏹', bow: true, mass: 0.8, tip: 'Bogen: schnell, gut gegen leichte Rüstung – Schilde fangen Pfeile ab' },
   crossbow: { name: 'Armbrust', icon: '🎯', bow: true, crossbow: true, mass: 2.6, tip: 'Armbrust: Sehne zurückziehen bis sie einrastet, Abzug schießt – Bolzen durchschlagen Rüstung' },
   shield: { name: 'Schild', icon: '🛡', shield: { r: 0.3 }, mass: 2.5, thrown: { type: 'blunt', power: 16, shield: 6 }, tip: 'Schild: blocken, Pfeile abfangen, Schildstoß' },
+  buckler: { name: 'Buckler', icon: '🔘', shield: { r: 0.17, buckler: true }, mass: 0.8, slot: 'hip', thrown: { type: 'blunt', power: 12, shield: 4 },
+    tip: 'Buckler: kleiner Faustschild – nur wer ihn dem Schlag entgegenstößt, lenkt ab (dann aber perfekt); kurzer Faustschild-Stoß' },
   stone: { name: 'Stein', icon: '🪨', melee: { kind: 'blunt', blunt: 12, minSpeed: 1.8, shield: 3 }, mass: 0.9, reach: 1.0, thrown: { type: 'blunt', power: 15, shield: 5 },
     tip: 'Stein: werfen! Am Kopf betäubt er, gegen Ungepanzerte tut er weh' }
 };
+// Holster-Größe: an die Hüfte passt Kleines und Mittleres, auf den Rücken alles
+for (const [id, d] of Object.entries(WEAPONS)) if (!d.slot) d.slot = ['dagger', 'sword', 'mace', 'axe', 'stone'].includes(id) ? 'hip' : 'back';
 // Alles kann geworfen werden: Bögen und Armbrust treffen nur schwach
 WEAPONS.bow.thrown = { type: 'blunt', power: 8 }; WEAPONS.crossbow.thrown = { type: 'blunt', power: 14 };
 export const TILT = 0.55; // Klingen zeigen etwas nach oben (natürliche Handhaltung)
@@ -49,22 +63,33 @@ const stringMat = new THREE.LineBasicMaterial({ color: 0xeee8d8 });
 const m = (g, mat, x = 0, y = 0, z = 0) => { const o = new THREE.Mesh(g, mat); o.position.set(x, y, z); o.castShadow = true; return o; };
 
 // Klinge entlang -Z, Schneiden bei ±Y (hochkant in der Hand), flache Seiten bei ±X
-function bladeGeo(len, w, thick) {
+function bladeGeo(len, w, thick, curve = 0) {
   const s = new THREE.Shape();
-  s.moveTo(-w / 2, 0); s.lineTo(w / 2, 0); s.lineTo(w / 2 * 0.8, len * 0.85); s.lineTo(0, len); s.lineTo(-w / 2 * 0.8, len * 0.85); s.closePath();
+  if (curve) { // Säbel: einschneidig, nach hinten gebogen (Schneide an der Außenseite)
+    const c = (t) => curve * len * Math.sin(t * Math.PI * 0.5) ** 2;
+    s.moveTo(-w / 2, 0);
+    for (let i = 1; i <= 8; i++) { const t = i / 8; s.lineTo(-w / 2 * (1 - t * 0.7) - c(t), len * t * 0.93); }
+    s.lineTo(-c(1) - w * 0.1, len);
+    for (let i = 8; i >= 0; i--) { const t = i / 8; s.lineTo(w / 2 * (1 - t * 0.85) - c(t), len * t * 0.9); }
+    s.closePath();
+  } else { s.moveTo(-w / 2, 0); s.lineTo(w / 2, 0); s.lineTo(w / 2 * 0.8, len * 0.85); s.lineTo(0, len); s.lineTo(-w / 2 * 0.8, len * 0.85); s.closePath(); }
   const g = new THREE.ExtrudeGeometry(s, { depth: thick, bevelEnabled: true, bevelThickness: thick * 0.4, bevelSize: w * 0.12, bevelSegments: 1 });
   g.translate(0, 0, -thick / 2);
   g.rotateX(-Math.PI / 2); // Länge: +Y → -Z
   g.rotateZ(Math.PI / 2);  // Breite: X → Y (Schneide hochkant)
   return g;
 }
-function bladed(id, { len, w, thick, guardW, grip, pommel }) {
+function bladed(id, { len, w, thick, guardW, grip, pommel, curve = 0, ring = false }) {
   const root = new THREE.Group();
   const model = new THREE.Group();
   model.rotation.x = TILT;
   root.add(model);
-  model.add(m(bladeGeo(len, w, thick), steel, 0, 0, -0.03));
+  model.add(m(bladeGeo(len, w, thick, curve), steel, 0, 0, -0.03));
   model.add(m(new THREE.BoxGeometry(0.03, guardW, 0.022), brass, 0, 0, -0.025));
+  if (ring) { // Rapier: Korbgriff aus Bügeln schützt die Hand
+    for (const a of [0, 1.2, -1.2]) { const t = m(new THREE.TorusGeometry(0.055, 0.005, 5, 16, Math.PI), brass, 0, 0, 0.03); t.rotation.set(0, Math.PI / 2, Math.PI / 2 + a * 0.4); model.add(t); }
+    model.add(m(new THREE.TorusGeometry(0.03, 0.005, 5, 12), brass, 0, 0, -0.04));
+  }
   model.add(m(new THREE.CylinderGeometry(0.016, 0.017, grip, 10).rotateX(Math.PI / 2), leather, 0, 0, grip / 2 - 0.02));
   model.add(m(new THREE.SphereGeometry(pommel, 10, 8), brass, 0, 0, grip - 0.01));
   // Messpunkte (lokal in root): Klingenansatz, Spitze, Schneidenrichtung, Platz für die zweite Hand
@@ -91,6 +116,71 @@ const buildMace = () => hafted({ tilt: TILT, back: 0.06, len: 0.5, r: 0.014, hit
   for (let i = 0; i < 3; i++) { const f = m(new THREE.BoxGeometry(0.012, 0.135, 0.085), steel, 0, 0, -0.52); f.rotation.z = i * Math.PI / 3; M.add(f); }
   M.add(m(new THREE.ConeGeometry(0.016, 0.05, 6).rotateX(-Math.PI / 2), steel, 0, 0, -0.585));
 } });
+function buildMorningstar() {
+  const P = hafted({ tilt: TILT, back: 0.06, len: 0.42, r: 0.016, hit: [0.4, 0.44, 0], head(M) {
+    M.add(m(new THREE.CylinderGeometry(0.022, 0.018, 0.05, 8).rotateX(Math.PI / 2), darkSteel, 0, 0, -0.42));
+    M.add(m(new THREE.TorusGeometry(0.012, 0.004, 4, 8), darkSteel, 0, 0, -0.455));
+  } });
+  // Kette und Kugel leben im Welt-Raum (sie schwingen frei) – Gruppe wird beim ersten Update zur Szene hinzugefügt
+  const ch = { n: 6, pts: [], prev: [], links: [], ball: null, group: new THREE.Group(), anchor: new THREE.Vector3(0, 0, -0.455).applyEuler(P.model.rotation), ready: false };
+  const linkGeo = new THREE.CylinderGeometry(0.006, 0.006, 1, 5);
+  for (let i = 0; i < ch.n; i++) { const l = m(linkGeo, darkSteel); ch.links.push(l); ch.group.add(l); }
+  const ball = new THREE.Group();
+  ball.add(m(new THREE.SphereGeometry(0.055, 12, 10), darkSteel));
+  const spike = new THREE.ConeGeometry(0.012, 0.045, 5);
+  for (const d of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1], [0.7, 0.7, 0], [-0.7, -0.7, 0], [0, 0.7, 0.7], [0, -0.7, -0.7]]) {
+    const v = new THREE.Vector3(...d).normalize(), sp = m(spike, steel);
+    sp.position.copy(v).multiplyScalar(0.068); sp.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), v); ball.add(sp);
+  }
+  ch.ball = ball; ch.group.add(ball);
+  for (let i = 0; i <= ch.n; i++) { ch.pts.push(new THREE.Vector3()); ch.prev.push(new THREE.Vector3()); }
+  return { ...P, chain: ch };
+}
+// Kettensimulation (Verlet, mehrere Durchläufe, Geschwindigkeit begrenzt → kein explosionsartiges Zucken).
+// Liefert die Kugelposition vorher/nachher für die Treffererkennung.
+const _ca = new THREE.Vector3(), _cd = new THREE.Vector3(), _cy = new THREE.Vector3(0, 1, 0);
+export function updateChain(w, dt, scene) {
+  const C = w.chain;
+  if (!C.group.parent) scene.add(C.group);
+  C.group.visible = w.root.visible;
+  w.root.updateMatrixWorld(true);
+  const A = w.root.localToWorld(_ca.copy(C.anchor)), L = w.def.flail.chain / C.n, P = C.pts, Q = C.prev;
+  if (!C.ready || dt <= 0 || P[0].distanceTo(A) > 1.5) { // erster Aufruf oder Sprung: Kette gerade nach unten
+    for (let i = 0; i <= C.n; i++) { P[i].copy(A).y -= L * i; Q[i].copy(P[i]); }
+    C.ready = true; C.ballPrev = P[C.n].clone(); return null;
+  }
+  C.ballPrev = (C.ballPrev || new THREE.Vector3()).copy(P[C.n]);
+  const steps = 3, h = Math.min(dt, 0.05) / steps;
+  for (let s = 0; s < steps; s++) {
+    P[0].lerp(A, (s + 1) / steps); Q[0].copy(P[0]);
+    for (let i = 1; i <= C.n; i++) {
+      const v = _cd.subVectors(P[i], Q[i]).multiplyScalar(0.995);
+      if (v.length() > 0.35) v.setLength(0.35);  // Geschwindigkeit begrenzen
+      Q[i].copy(P[i]);
+      P[i].add(v); P[i].y -= 9.81 * h * h;
+    }
+    for (let it = 0; it < 6; it++) {
+      for (let i = 0; i < C.n; i++) {
+        const a = P[i], b = P[i + 1], d = _cd.subVectors(b, a), len = d.length() || 1e-6, diff = (len - L) / len;
+        // Glied 0 hängt fest am Griff; die schwere Kugel bewegt sich weniger als die Glieder
+        const wa = i === 0 ? 0 : i + 1 === C.n ? 0.8 : 0.5, wb = 1 - wa;
+        a.addScaledVector(d, diff * wa); b.addScaledVector(d, -diff * wb);
+      }
+      P[0].copy(A);
+    }
+    // fester Längen-Durchgang vom Griff aus: die Kette dehnt sich nie (stabil auch bei sehr schnellen Bewegungen)
+    for (let i = 1; i <= C.n; i++) { const d = _cd.subVectors(P[i], P[i - 1]), len = d.length(); if (len > L) P[i].copy(P[i - 1]).addScaledVector(d, L / len); }
+    for (let i = 1; i <= C.n; i++) if (P[i].y < (i === C.n ? w.def.flail.ballR : 0.01)) P[i].y = i === C.n ? w.def.flail.ballR : 0.01; // Boden
+  }
+  for (let i = 0; i < C.n; i++) {
+    const l = C.links[i], a = P[i], b = P[i + 1];
+    l.position.lerpVectors(a, b, 0.5);
+    l.scale.set(1, a.distanceTo(b), 1);
+    l.quaternion.setFromUnitVectors(_cy, _cd.subVectors(b, a).normalize());
+  }
+  C.ball.position.copy(P[C.n]);
+  return { a: C.ballPrev, b: P[C.n] };
+}
 const buildAxe = () => hafted({ tilt: TILT, back: 0.08, len: 0.62, r: 0.015, hit: [0.46, 0.66, -0.08], head(M) {
   M.add(m(new THREE.BoxGeometry(0.012, 0.18, 0.15), steel, 0, -0.09, -0.56));   // Blatt, Schneide unten/vorne
   M.add(m(new THREE.BoxGeometry(0.012, 0.05, 0.23), steel, 0, -0.165, -0.56));  // breite Schneide
@@ -130,6 +220,16 @@ export function setXbowString(w, pull) {
   w.nocked.visible = w.loaded;
 }
 export const xbowPull = (w, handWorld) => THREE.MathUtils.clamp((w.model.worldToLocal(handWorld.clone()).z - XB.rest) / (XB.latch - XB.rest), 0, 1);
+function buildBuckler() {
+  const root = new THREE.Group(), model = new THREE.Group();
+  root.add(model);
+  // kleiner Faustschild: in der Faust gehalten, Vorderseite nach -Z (vor den Fingerknöcheln)
+  model.add(m(new THREE.CylinderGeometry(0.17, 0.17, 0.012, 28).rotateX(Math.PI / 2), darkSteel, 0, 0, -0.06));
+  model.add(m(new THREE.TorusGeometry(0.17, 0.008, 6, 32), steel, 0, 0, -0.06));
+  model.add(m(new THREE.SphereGeometry(0.06, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2).rotateX(-Math.PI / 2), steel, 0, 0, -0.066));
+  model.add(m(new THREE.CylinderGeometry(0.014, 0.014, 0.1, 8), leather, 0, 0, -0.02));
+  return { root, model, center: new THREE.Vector3(0, 0, -0.06), normal: new THREE.Vector3(0, 0, -1) };
+}
 function buildShield() {
   const root = new THREE.Group();
   const model = new THREE.Group();
@@ -175,6 +275,11 @@ export function createWeapon(id) {
   const def = WEAPONS[id];
   const parts = id === 'dagger' ? bladed(id, { len: 0.22, w: 0.032, thick: 0.006, guardW: 0.07, grip: 0.1, pommel: 0.016 })
     : id === 'sword' ? bladed(id, { len: 0.88, w: 0.05, thick: 0.008, guardW: 0.2, grip: 0.24, pommel: 0.024 })
+    : id === 'shortsword' ? bladed(id, { len: 0.6, w: 0.05, thick: 0.008, guardW: 0.14, grip: 0.12, pommel: 0.022 })
+    : id === 'sabre' ? bladed(id, { len: 0.8, w: 0.04, thick: 0.006, guardW: 0.12, grip: 0.13, pommel: 0.018, curve: 0.09 })
+    : id === 'rapier' ? bladed(id, { len: 1.0, w: 0.022, thick: 0.007, guardW: 0.22, grip: 0.12, pommel: 0.024, ring: true })
+    : id === 'greatsword' ? bladed(id, { len: 1.2, w: 0.06, thick: 0.009, guardW: 0.3, grip: 0.38, pommel: 0.03 })
+    : id === 'morningstar' ? buildMorningstar() : id === 'buckler' ? buildBuckler()
     : id === 'mace' ? buildMace() : id === 'axe' ? buildAxe() : id === 'hammer' ? buildHammer() : id === 'spear' ? buildSpear()
     : id === 'crossbow' ? buildCrossbow() : id === 'bow' ? buildBow() : id === 'stone' ? buildStone() : buildShield();
   parts.root.traverse(o => { if (o.isMesh) o.castShadow = true; });
