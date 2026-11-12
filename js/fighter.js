@@ -147,7 +147,7 @@ const merge = (parts) => mergeGeometries(parts.map(g => (g.index ? g : g)), fals
 const geoCache = new Map();
 const cached = (key, make) => { let g = geoCache.get(key); if (!g) { g = make(); geoCache.set(key, g); } return g; };
 const capsule = (r, L) => new THREE.CapsuleGeometry(r, Math.max(0.01, L - 2 * r), 3, 10).translate(0, -L / 2, 0);
-const mk = (geo, mat = bodyMat) => { const o = new THREE.Mesh(geo, mat); o.castShadow = true; return o; };
+const mk = (geo, mat = bodyMat) => new THREE.Mesh(geo, mat);
 
 const SKIN = [0xe0b090, 0xd09a78, 0xc68a64, 0xeabf9f];
 const HAIR = [0x2a1c12, 0x4a3018, 0x1a1a1a, 0x7a5a30, 0x8a3a1a];
@@ -191,6 +191,9 @@ function faceTexture(skin, variant, hair) {
   faceCache.set(key, m);
   return m;
 }
+// 12 feste Gesichter (Hautton, Haarfarbe, Variante): werden beim Laden einmal gezeichnet
+const FACE_POOL = Array.from({ length: 12 }, (_, i) => [SKIN[i % SKIN.length], HAIR[(i * 3) % HAIR.length], (i * 5) % 8]);
+export function warmFaces() { for (const f of FACE_POOL) faceTexture(f[0], f[2], f[1]); }
 const skullGeo = new THREE.SphereGeometry(0.105, 20, 14).scale(0.9, 1.08, 0.98).translate(0, 0.1, 0);
 
 function headGearGeo(kind, hair, cloth, beard) {
@@ -335,7 +338,7 @@ export const SHIELD_HP = { round: 70, heater: 120 }; // Haltbarkeit: Äxte und H
 const pick = (a) => a[Math.floor(Math.random() * a.length)];
 export function buildFighter(typeId) {
   const T = ENEMY_TYPES[typeId];
-  const skin = pick(SKIN), hair = pick(HAIR), tunic = pick(T.tunic), helmet = pick(T.helmets);
+  const look = pick(FACE_POOL), skin = look[0], hair = look[1], tunic = pick(T.tunic), helmet = pick(T.helmets);
   const pants = pick([0x3a3028, 0x2e2a26, 0x4a3b2a, 0x35302a]);
   const A = T.armor;
   const sleeve = A.arms === 'none' ? skin : (ARMOR_COLOR[A.arms] || tunic);
@@ -347,7 +350,7 @@ export function buildFighter(typeId) {
   const hipsMesh = mk(hipsGeo(A.legs === 'cloth' ? pants : legCol)); hips.add(hipsMesh);
   const torsoMesh = mk(torsoGeo(A.torso, tunic, sleeve, skin)); torso.add(torsoMesh);
   head.position.y = 0.6; torso.add(head);
-  const face = mk(skullGeo, helmet === 'great' ? faceTexture(skin, 0, hair) : faceTexture(skin, Math.floor(Math.random() * 8), hair)); head.add(face);
+  const face = mk(skullGeo, faceTexture(skin, look[2], hair)); head.add(face);
   const gear = mk(headGearGeo(helmet, hair, tunic, !!T.beard)); head.add(gear);
 
   const arms = [-1, 1].map(sx => {
@@ -373,4 +376,9 @@ export function buildFighter(typeId) {
   };
 }
 export const makeWeapon = (id) => mk(weaponGeo(id));
+// weicher runder Bodenschatten (ein einziger Zeichenaufruf statt Schattenberechnung)
+const blobTex = (() => { const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'); const gr = g.createRadialGradient(32, 32, 4, 32, 32, 31); gr.addColorStop(0, 'rgba(0,0,0,0.55)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(c); })();
+const blobMat = new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, depthWrite: false, toneMapped: false });
+const blobGeo = new THREE.PlaneGeometry(0.75, 0.75).rotateX(-Math.PI / 2);
+export function makeBlob() { const b = new THREE.Mesh(blobGeo, blobMat); b.renderOrder = -4; return b; }
 export const makeShield = (kind, color) => mk(shieldGeo(kind, color));

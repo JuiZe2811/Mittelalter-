@@ -1,9 +1,9 @@
 import * as THREE from 'three';
-import { strikeTest, applyHit, boneOf } from './enemies.js?v=8';
-import { roomOccluders } from './room.js?v=8';
-import { SFX } from './sfx.js?v=8';
-import { sparks, puff } from './effects.js?v=8';
-import { makeArrowMesh, ARROW_LEN } from './arrow.js?v=8';
+import { strikeTest, applyHit, boneOf } from './enemies.js?v=9';
+import { roomOccluders } from './room.js?v=9';
+import { SFX } from './sfx.js?v=9';
+import { sparks, puff } from './effects.js?v=9';
+import { makeArrowMesh, ARROW_LEN } from './arrow.js?v=9';
 export { makeArrowMesh };
 
 // =============================================================================
@@ -13,26 +13,30 @@ export { makeArrowMesh };
 // Schneide wirken voll, mit der flachen Seite nur halb. Stiche (Bewegung entlang der Klinge) zählen
 // eigens – sie gehen besser durch Rüstung.
 // =============================================================================
-export const WEAPON_ORDER = ['dagger', 'sword', 'mace', 'axe', 'hammer', 'spear', 'bow', 'crossbow', 'shield'];
+export const WEAPON_ORDER = ['dagger', 'sword', 'mace', 'axe', 'hammer', 'spear', 'bow', 'crossbow', 'shield', 'stone'];
 // melee.kind: blade (Hieb + Stich) · blunt (stumpf) · axe (Hieb mit Durchschlag) · spear (Stich)
 // pen = Durchschlag: Anteil der Rüstung, der ignoriert wird · shield = Schaden an gegnerischen Schilden
 export const WEAPONS = {
   dagger: { name: 'Dolch', icon: '🗡', melee: { kind: 'blade', slash: 14, thrust: 30, minSpeed: 1.3, base: 0.03, len: 0.22, shield: 2 }, throwable: true, mass: 0.4, reach: 1.15,
-    tip: 'Dolch: schneller Stich – gut gegen Stoff, Gambeson und Kette; werfbar' },
+    thrown: { point: true, type: 'thrust', power: 38 }, tip: 'Dolch: schneller Stich – gut gegen Stoff, Gambeson und Kette; im Schwung loslassen = Wurf, bleibt stecken' },
   sword: { name: 'Langschwert', icon: '⚔', melee: { kind: 'blade', slash: 40, thrust: 34, minSpeed: 1.6, base: 0.06, len: 0.88, shield: 4 }, twoHand: true, mass: 1.4, reach: 1.75,
-    tip: 'Langschwert: Hieb gegen Ungepanzerte, Stich gegen Gambeson/Kette – an Platte gleitet es ab' },
+    thrown: { type: 'slash', power: 24 }, tip: 'Langschwert: Hieb gegen Ungepanzerte, Stich gegen Gambeson/Kette – an Platte gleitet es ab' },
   mace: { name: 'Streitkolben', icon: '🔨', melee: { kind: 'blunt', blunt: 34, minSpeed: 1.5, shield: 10 }, mass: 1.6, reach: 1.45,
-    tip: 'Streitkolben: stumpfe Wucht – wirkt durch Kette und Platte, betäubt am Helm' },
+    thrown: { type: 'blunt', power: 30, shield: 8 }, tip: 'Streitkolben: stumpfe Wucht – wirkt durch Kette und Platte, betäubt am Helm' },
   axe: { name: 'Streitaxt', icon: '🪓', melee: { kind: 'axe', slash: 48, pen: 0.3, minSpeed: 1.6, shield: 28 }, mass: 1.8, reach: 1.5,
-    tip: 'Streitaxt: schwerer Hieb, schlägt teils durch Rüstung und zertrümmert Schilde' },
+    thrown: { type: 'slash', power: 42, pen: 0.25, shield: 22, stick: 0.5 }, tip: 'Streitaxt: schwerer Hieb, schlägt teils durch Rüstung und zertrümmert Schilde' },
   hammer: { name: 'Kriegshammer', icon: '⚒', melee: { kind: 'blunt', blunt: 52, pen: 0.25, minSpeed: 1.5, shield: 22, knock: true }, twoHand: true, needTwo: true, mass: 3, reach: 1.8,
-    tip: 'Kriegshammer (beidhändig!): zertrümmert Platte, wirft Gegner zu Boden – einhändig schwach' },
+    thrown: { type: 'blunt', power: 44, pen: 0.2, shield: 18, knock: true }, tip: 'Kriegshammer (beidhändig!): zertrümmert Platte, wirft Gegner zu Boden – einhändig schwach' },
   spear: { name: 'Speer', icon: '🔱', melee: { kind: 'spear', thrust: 38, slash: 12, minSpeed: 1.6, shield: 3 }, twoHand: true, mass: 1.5, reach: 2.3,
-    tip: 'Speer: große Reichweite, Stiche gegen Gambeson und Kette – hält Gegner auf Abstand' },
+    thrown: { point: true, type: 'thrust', power: 58, pen: 0.15, shield: 6 }, tip: 'Speer (wirft sich wie ein Wurfspeer): große Reichweite, Stiche gegen Gambeson und Kette – hält Gegner auf Abstand' },
   bow: { name: 'Bogen', icon: '🏹', bow: true, mass: 0.8, tip: 'Bogen: schnell, gut gegen leichte Rüstung – Schilde fangen Pfeile ab' },
   crossbow: { name: 'Armbrust', icon: '🎯', bow: true, crossbow: true, mass: 2.6, tip: 'Armbrust: Sehne zurückziehen bis sie einrastet, Abzug schießt – Bolzen durchschlagen Rüstung' },
-  shield: { name: 'Schild', icon: '🛡', shield: { r: 0.3 }, mass: 2.5, tip: 'Schild: blocken, Pfeile abfangen, Schildstoß' }
+  shield: { name: 'Schild', icon: '🛡', shield: { r: 0.3 }, mass: 2.5, thrown: { type: 'blunt', power: 16, shield: 6 }, tip: 'Schild: blocken, Pfeile abfangen, Schildstoß' },
+  stone: { name: 'Stein', icon: '🪨', melee: { kind: 'blunt', blunt: 12, minSpeed: 1.8, shield: 3 }, mass: 0.9, reach: 1.0, thrown: { type: 'blunt', power: 15, shield: 5 },
+    tip: 'Stein: werfen! Am Kopf betäubt er, gegen Ungepanzerte tut er weh' }
 };
+// Alles kann geworfen werden: Bögen und Armbrust treffen nur schwach
+WEAPONS.bow.thrown = { type: 'blunt', power: 8 }; WEAPONS.crossbow.thrown = { type: 'blunt', power: 14 };
 export const TILT = 0.55; // Klingen zeigen etwas nach oben (natürliche Handhaltung)
 
 const steel = new THREE.MeshStandardMaterial({ color: 0xd6dae2, metalness: 0.55, roughness: 0.3, emissive: 0x1c1f24 });
@@ -158,17 +162,32 @@ function buildBow() {
   return { root, model, string: str, tipA, tipB, nock: new THREE.Vector3(0, 0, STRING_Z), grip: new THREE.Vector3(0, 0, -0.07), nocked };
 }
 
+function buildStone() {
+  const root = new THREE.Group(), model = new THREE.Group();
+  root.add(model);
+  const g = new THREE.DodecahedronGeometry(0.055, 0);
+  g.scale(1, 0.8, 1.15);
+  model.add(m(g, new THREE.MeshStandardMaterial({ color: 0x77736c, roughness: 0.95, flatShading: true })));
+  const P = (z) => new THREE.Vector3(0, 0, z);
+  return { root, model, base: P(0.03), tip: P(-0.06), ga: P(0.03), gb: P(-0.06), edge: new THREE.Vector3(0, 1, 0), grip2: null };
+}
 export function createWeapon(id) {
   const def = WEAPONS[id];
   const parts = id === 'dagger' ? bladed(id, { len: 0.22, w: 0.032, thick: 0.006, guardW: 0.07, grip: 0.1, pommel: 0.016 })
     : id === 'sword' ? bladed(id, { len: 0.88, w: 0.05, thick: 0.008, guardW: 0.2, grip: 0.24, pommel: 0.024 })
     : id === 'mace' ? buildMace() : id === 'axe' ? buildAxe() : id === 'hammer' ? buildHammer() : id === 'spear' ? buildSpear()
-    : id === 'crossbow' ? buildCrossbow() : id === 'bow' ? buildBow() : buildShield();
+    : id === 'crossbow' ? buildCrossbow() : id === 'bow' ? buildBow() : id === 'stone' ? buildStone() : buildShield();
   parts.root.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  // Größe (für Würfe) und Grundneigung des Modells (beim Halten im Griff-Raum der Hand wieder herausgerechnet)
+  const box = new THREE.Box3().setFromObject(parts.root), sz = box.getSize(new THREE.Vector3());
+  parts.hitC = parts.tip ? parts.base.clone().lerp(parts.tip, 0.6) : box.getCenter(new THREE.Vector3());
+  parts.hitR = THREE.MathUtils.clamp(Math.min(sz.x, sz.y, sz.z) * 0.5 + 0.04, 0.06, 0.2);
+  parts.tilt0 = parts.model.rotation.x;
   return {
     id, def, ...parts, holder: null, second: null, twoHand: false, phys: null, draw: 0,
     prevTip: null, prevBase: null, tipVel: new THREE.Vector3(), tipSpeed: 0, spentUntil: 0, // Nahkampf
-    prevC: null, cVel: new THREE.Vector3(), bashUntil: 0, stuck: []                         // Schild
+    prevC: null, cVel: new THREE.Vector3(), bashUntil: 0, stuck: [],                        // Schild
+    slide: 0, kickT: 0, kickAmt: 0, embed: null                                              // Griffposition, Rückprall, steckt fest
   };
 }
 
@@ -203,13 +222,23 @@ export function shootArrow(from, dir, speed, o = {}) {
   flying.push({ obj, vel: dir.clone().normalize().multiplyScalar(speed), kind: 'arrow', len: ARROW_LEN * (o.bolt ? 0.5 : 1), power: o.power ?? 15 + speed * 1.3, pen: o.pen || 0, shield: o.bolt ? 6 : 2, life: 6, stuck: false });
   SFX.whoosh();
 }
-// Dolch fliegt mit der Spitze voran; onDone(w, restgeschwindigkeit) wenn er landet
-export function throwBlade(w, vel, onDone) {
+// Geworfene Waffe: Spitze voran (Dolch, Speer) oder sich überschlagend (alles andere).
+// onDone(w, restgeschwindigkeit, info) wenn sie landet · info.embed = { e, bone } (steckt im Gegner) · info.wall (steckt in der Wand)
+const SPIN_AXIS = new THREE.Vector3();
+export function throwWeapon(w, vel, angVel, onDone) {
   scene.attach(w.root);
-  flying.push({ obj: w.root, w, vel: vel.clone(), kind: 'blade', len: 0.2, power: w.def.melee.thrust * 1.25, pen: 0, shield: 2, life: 3, stuck: false, onDone });
+  const T = w.def.thrown || { type: 'blunt', power: 10 };
+  const speedK = THREE.MathUtils.clamp(vel.length() / 7, 0.6, 1.5);
+  const f = { obj: w.root, w, vel: vel.clone(), kind: T.point ? 'point' : 'spin', len: T.point ? w.tip.length() : 0, power: T.power * speedK, type: T.type, pen: T.pen || 0, shield: T.shield || 4, knock: !!T.knock, stick: T.stick || 0, life: 3, stuck: false, onDone };
+  if (!T.point) { // Drehung beim Fliegen: aus der Handbewegung, mindestens ein deutliches Überschlagen
+    f.spin = angVel ? angVel.clone() : new THREE.Vector3();
+    if (f.spin.length() < 7) f.spin.copy(SPIN_AXIS.set(-vel.z, 0, vel.x).normalize().multiplyScalar(-9));
+    f.prevC = w.root.localToWorld(w.hitC.clone());
+  } else f.tipDir = w.tip.clone().normalize();
+  flying.push(f);
   SFX.whoosh();
 }
-const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3(), FWD = new THREE.Vector3(0, 0, -1), XA = new THREE.Vector3(1, 0, 0);
+const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3(), FWD = new THREE.Vector3(0, 0, -1), _sq = new THREE.Quaternion();
 export function updateFlying(dt) {
   for (let i = flying.length - 1; i >= 0; i--) {
     const f = flying[i];
@@ -219,13 +248,14 @@ export function updateFlying(dt) {
       continue;
     }
     f.vel.y -= 9.81 * dt * (f.kind === 'arrow' ? 0.5 : 1);
+    if (f.kind === 'spin') { flySpin(f, i, dt); continue; }
     const a = tmpA.copy(f.obj.position);
     const b = tmpB.copy(a).addScaledVector(f.vel, dt);
     const dir = f.vel.clone().normalize();
     // Ausrichtung entlang der Flugbahn
     const q = new THREE.Quaternion().setFromUnitVectors(FWD, dir);
     if (f.kind === 'arrow') f.obj.quaternion.copy(q);
-    else f.obj.quaternion.copy(q).multiply(new THREE.Quaternion().setFromAxisAngle(XA, -TILT));
+    else f.obj.quaternion.setFromUnitVectors(f.tipDir, dir); // Spitze in Flugrichtung
     const tipOff = f.len;
     const tipA = a.clone().addScaledVector(dir, tipOff), tipB = b.clone().addScaledVector(dir, tipOff);
     // Gegner getroffen? (Schild oder Parade können den Pfeil abfangen)
@@ -240,12 +270,18 @@ export function updateFlying(dt) {
       continue;
     }
     if (h) {
-      const r = applyHit(h.e, h.zone, { type: 'thrust', power: f.power, pen: f.pen, dir: dir.clone(), point: h.point, knock: 0.6 });
+      const r = applyHit(h.e, h.zone, { type: 'thrust', power: f.power, pen: f.pen, dir: dir.clone(), point: h.point, knock: f.kind === 'arrow' ? 0.6 : 1 });
       onHit(h, r, { type: 'thrust', source: f.kind });
       if (f.kind === 'arrow') { // Pfeil bleibt im Körper stecken
         f.obj.position.copy(h.point).addScaledVector(dir, -f.len + 0.12);
         boneOf(h.e, h.zone).attach(f.obj); f.stuck = true; f.life = 25;
-      } else { flying.splice(i, 1); f.onDone && f.onDone(f.w, f.vel.clone().multiplyScalar(0.12)); }
+      } else { // geworfene Klinge bleibt im Gegner stecken (beim Sterben fällt sie heraus)
+        flying.splice(i, 1);
+        f.obj.position.copy(h.point).addScaledVector(dir, -f.len + 0.1);
+        const bone = boneOf(h.e, h.zone);
+        if (!r.killed) { bone.attach(f.obj); f.onDone && f.onDone(f.w, null, { embed: { e: h.e, bone } }); }
+        else f.onDone && f.onDone(f.w, f.vel.clone().multiplyScalar(0.12));
+      }
       continue;
     }
     // Wand/Möbel/Boden getroffen? → stecken bleiben (Pfeil) bzw. herunterfallen (Dolch)
@@ -258,12 +294,51 @@ export function updateFlying(dt) {
       const p = wall ? wall.point : tipB.clone().setY(Math.max(0.005, tipB.y));
       if (wall || floorHitY) { sparks(p, wall && wall.face ? wall.face.normal : new THREE.Vector3(0, 1, 0), 4); puff(p, 0x9a8a70, 0.06, 0.5, 0.1, 0.4); SFX.thud(0.25); }
       if (f.kind === 'arrow') { f.obj.position.add(p.clone().sub(tipA)); f.stuck = true; f.life = 8; }
-      else { flying.splice(i, 1); f.onDone && f.onDone(f.w, f.vel.clone().multiplyScalar(0.1)); }
+      else if (wall && f.vel.length() > 5) { // Dolch/Speer bleibt in Wand oder Tisch stecken
+        flying.splice(i, 1); f.obj.position.add(p.clone().sub(tipA).addScaledVector(dir, 0.06)); SFX.thunk();
+        f.onDone && f.onDone(f.w, null, { wall: true });
+      } else { flying.splice(i, 1); f.onDone && f.onDone(f.w, f.vel.clone().multiplyScalar(0.1)); }
       continue;
     }
     f.obj.position.copy(b);
   }
 }
+// sich überschlagender Wurf: Trefferkugel um den „Kopf“ der Waffe
+const _c = new THREE.Vector3(), _rc = new THREE.Raycaster();
+function flySpin(f, i, dt) {
+  const w = f.w;
+  f.obj.position.addScaledVector(f.vel, dt);
+  const ang = f.spin.length();
+  if (ang > 0) { _sq.setFromAxisAngle(_c.copy(f.spin).divideScalar(ang), ang * dt); f.obj.quaternion.premultiply(_sq); }
+  f.obj.updateMatrixWorld(true);
+  const c = w.root.localToWorld(_c.copy(w.hitC));
+  const h = strikeTest(f.prevC, c, w.hitR, true);
+  const prev = f.prevC.clone();
+  f.prevC.copy(c);
+  const dir = f.vel.clone().normalize();
+  if (h) {
+    flying.splice(i, 1);
+    if (h.kind !== 'body') { onBlocked(h, f); f.onDone && f.onDone(w, f.vel.clone().multiplyScalar(-0.25).setY(1)); return; }
+    const r = applyHit(h.e, h.zone, { type: f.type, power: f.power, pen: f.pen, knockdown: f.knock, dir, point: h.point, knock: 1.4 });
+    onHit(h, r, { type: f.type, source: 'thrown' });
+    // eine Axt kann mit der Schneide stecken bleiben
+    if (f.stick && !r.killed && Math.random() < f.stick) { const bone = boneOf(h.e, h.zone); bone.attach(f.obj); f.onDone && f.onDone(w, null, { embed: { e: h.e, bone } }); return; }
+    f.onDone && f.onDone(w, f.vel.clone().multiplyScalar(-0.2).setY(0.8));
+    return;
+  }
+  // Wand, Möbel, Boden: abprallen und mit Physik weiterfallen
+  const len = prev.distanceTo(c);
+  _rc.set(prev, c.clone().sub(prev).normalize()); _rc.far = len + w.hitR;
+  const wall = len > 0 ? _rc.intersectObjects(roomOccluders(), false)[0] : null;
+  if (wall || c.y < 0.03 || f.life <= 0) {
+    flying.splice(i, 1);
+    if (wall || c.y < 0.03) { SFX.thud(Math.min(0.6, f.vel.length() / 12)); puff(wall ? wall.point : c, 0x9a8a70, 0.06, 0.5, 0.1, 0.4); }
+    const v = f.vel.clone();
+    if (wall && wall.face) { const n = wall.face.normal.clone().transformDirection(wall.object.matrixWorld); v.reflect(n).multiplyScalar(0.35); }
+    else v.multiplyScalar(0.3).setY(Math.abs(v.y) * 0.3);
+    f.onDone && f.onDone(w, v);
+  }
+}
 export function clearFlying() {
-  for (const f of flying.splice(0)) { if (f.kind === 'arrow') { if (f.obj.parent) f.obj.parent.remove(f.obj); } else if (f.onDone) f.onDone(f.w, new THREE.Vector3()); }
+  for (const f of flying.splice(0)) { if (f.kind === 'arrow' || !f.w) { if (f.obj.parent) f.obj.parent.remove(f.obj); } else if (f.onDone) f.onDone(f.w, new THREE.Vector3()); }
 }

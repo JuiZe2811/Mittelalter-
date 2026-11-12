@@ -65,6 +65,7 @@ Das Ziel wird am Ende des Ausholens festgelegt. Wer rechtzeitig zurückweicht, z
 | 🏹 Bogen | Pfeile | leichte Rüstung | Schilde fangen Pfeile ab, Platte |
 | 🎯 Armbrust | Bolzen mit Durchschlag | auch Kette und Platte | langsames Spannen |
 | 🛡 Schild | Block, Schildstoß | | |
+| 🪨 Stein | zum Werfen | Ungepanzerte, am Kopf betäubend | Rüstung |
 
 So wirken sie:
 - **Hieb:** Die Klinge muss wirklich geschwungen werden. Je schneller, desto mehr Schaden; langsames Hineinhalten zählt nicht.
@@ -74,7 +75,6 @@ So wirken sie:
 - **Beidhändig:** Schwert, Hammer und Speer kannst du mit der zweiten Hand hinten am Griff fassen. Beide Hände führen dann die Waffe, und sie trifft härter.
 - **Schilde der Gegner** haben eine Haltbarkeit. Die Axt zertrümmert einen Rundschild in drei Hieben, das Schwert braucht ein Vielfaches.
 - **Schildstoß:** Stößt du den Schild schnell nach vorne gegen einen Gegner, taumelt er zurück.
-- **Dolch werfen:** Lässt du den Dolch mitten im Schwung los, fliegt er.
 - **Bogen:** In einer Hand halten, mit der anderen die Sehne greifen, ziehen, loslassen.
 - **Armbrust:** Mit der anderen Hand die Sehne zurückziehen, bis sie einrastet. Der Abzug schießt.
 - Pfeile und Bolzen bleiben im Gegner oder in seinem Schild stecken.
@@ -85,6 +85,38 @@ So wirken sie:
 - **Parade:** Geübte Gegner parieren mit der Waffe und setzen danach oft zum Gegenangriff an.
 - **Ausweichen:** Leichte Gegner springen zurück.
 - Von hinten und von der Seite können sie nicht blocken.
+
+### Handhabung der Waffen
+
+- **Haltung:** Nahkampfwaffen sitzen in der Handfläche, die Klinge verlängert die geschlossene Faust. Der Winkel ist einstellbar: Einstellungen → Bedienung → Griffwinkel.
+  - Fühlt es sich falsch an, kannst du mit „Waffe sitzt in der Handfläche: Aus“ zur alten Haltung am Zeigestrahl zurück.
+- **Griff-Taste:**
+  - „Halten“: Die Waffe bleibt in der Hand, solange du die Taste drückst.
+  - „Tippen = festhalten“: Einmal drücken greift, nochmal drücken lässt los. Die Hand ermüdet so nicht.
+- **Greifen:** Liegt eine Waffe in Greifweite, wird sie etwas größer und der Controller vibriert kurz.
+- **Speer und Hammer** hältst du dort am Schaft, wo du zugreifst.
+- **Beidhändig:** Die zweite Hand kann am Griff, am Schaft oder sogar an der Klinge zufassen. Die Waffe zeigt dann von der hinteren zur vorderen Hand.
+- **Gewicht:** Schwere Waffen folgen der Drehung der Hand etwas träge, beidhändig geführt doppelt so schnell. Abschaltbar unter „Gewicht spürbar“.
+- **Rückmeldung:**
+  - Kräftige Schwünge zischen hörbar, der Controller vibriert leicht, und eine helle Schwung-Spur folgt der Klinge (abschaltbar).
+  - Bei Treffern, Blocks und auf Rüstung federt die Waffe sichtbar zurück.
+
+### Werfen
+
+Alles, was du in der Hand hältst, kannst du werfen: Lass es mitten im Schwung los.
+
+| Gegenstand | Flug | Wirkung |
+|---|---|---|
+| Dolch, Speer | Spitze voran | bleiben im Gegner stecken (beim Herausziehen blutet die Wunde) oder in Wand und Tisch |
+| Streitaxt | überschlägt sich | trifft hart, bleibt manchmal stecken, beschädigt Schilde |
+| Kriegshammer | überschlägt sich | wirft Gegner zu Boden |
+| Streitkolben, Schwert, Schild, Bogen | überschlagen sich | stumpfer bzw. schwacher Treffer |
+| Stein | überschlägt sich | am Kopf betäubend |
+
+- Gezählt wird die schnellste Handbewegung kurz vor dem Loslassen. Die Wurfkraft lässt sich unter Bedienung → Wurfkraft einstellen.
+- Schilde der Gegner fangen Würfe ab.
+- **Waffen der Gegner:** Lässt ein Gegner seine Waffe oder seinen Schild fallen (entwaffnet, Arm unbrauchbar, tot), liegt sie als echte Waffe am Boden. Du kannst sie aufheben, benutzen und werfen.
+  - Keule wird zum Streitkolben, Hellebarde zum Speer.
 
 ### Taktik der Gegner
 
@@ -168,6 +200,16 @@ Es gibt nur normale menschliche Gegner, keine Bosse und keine Riesen.
 
 Solange das Waffen-Menü offen ist, steht alles still.
 
+## Flüssiges Bild
+
+In VR fühlt sich die Kopfbewegung nur dann flüssig an, wenn jedes Bild rechtzeitig fertig wird.
+
+- **Keine Hänger beim Auftauchen:** Alle Gegner, Waffen, Gesichter und Texte werden beim Laden einmal vorbereitet.
+- **Wiederverwendete Texte:** Kampf-Texte kommen aus einem festen Vorrat und werden nicht jedes Mal neu erzeugt.
+- **Günstige Schatten:** Gegner werfen einen weichen Bodenschatten statt echter Schatten. Echte Schatten sind standardmäßig aus; schaltest du sie ein, werden sie jedes Bild berechnet statt nur jedes zweite.
+- **Bildrate:** Unter Einstellungen → Grafik → „Bildrate anzeigen“ siehst du die aktuelle Bildrate am linken Handgelenk.
+  - Hält die Brille 90 Hz nicht, schaltet „Automatisch flüssig halten“ jetzt nach gut einer Sekunde auf 72 Hz und spart dann schrittweise Details.
+
 ## Einstellungen
 
 Im Reiter **⚔ Kampf**:
@@ -182,11 +224,11 @@ Im Reiter **⚔ Kampf**:
 | rechte Maus ziehen | umschauen |
 | WASD | gehen, auch auf den Tisch hinauf |
 | Q | Waffen-Menü |
-| 1–9 | Dolch, Schwert, Streitkolben, Axt, Hammer, Speer, Bogen, Armbrust, Schild |
+| 1–9, 0 | Dolch, Schwert, Streitkolben, Axt, Hammer, Speer, Bogen, Armbrust, Schild, Stein |
 | Linksklick | Hieb oder Schlag dorthin, wo das Fadenkreuz zeigt; Bogen: halten = spannen; Armbrust: erst spannen, dann schießen |
 | E | Stich |
 | Leertaste | Deckung: Schild vor den Körper bzw. Klinge quer über den Kopf |
-| F | Dolch werfen |
+| F | Waffe in der Hand werfen |
 | Enter / Esc | Start / Pause |
 
 ## Dateien
@@ -203,4 +245,4 @@ Im Reiter **⚔ Kampf**:
 | `js/room.js` | Raum-Modell; Speichern und Laden |
 | `js/physics.js` | Physik für fallen gelassene Waffen |
 | `js/effects.js`, `js/sfx.js`, `js/util.js` | Partikel, Texte, Geräusche, Hilfsfunktionen |
-| `tools/version.py` | Versionsnummer setzen: `python3 tools/version.py 9` |
+| `tools/version.py` | Versionsnummer setzen: `python3 tools/version.py 10` |

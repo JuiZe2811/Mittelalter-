@@ -1,11 +1,11 @@
 import * as THREE from 'three';
-import { surfacesOf, roomOccluders } from './room.js?v=8';
-import { buildNav, findPath, walkable, nearestWalkable, groundAt, STEP } from './nav.js?v=8';
-import { SFX, SFX3D } from './sfx.js?v=8';
-import { puff, addDebris, burst, sparks, floorDecal, floatingText } from './effects.js?v=8';
-import { segSeg, segPoint, segDisc, slerpDir } from './geom.js?v=8';
-import { makeArrowMesh, ARROW_LEN } from './arrow.js?v=8';
-import { HIP, SH_X, SH_Y, L1, L2, THIGH, SHIN, REACH, ENEMY_TYPES, TYPE_ORDER, ATK, EW, PARRY, SHIELD_POSE, SHIELD_R, SHIELD_HP, STANCES, bloodMat, buildFighter, makeWeapon, makeShield } from './fighter.js?v=8';
+import { surfacesOf, roomOccluders } from './room.js?v=9';
+import { buildNav, findPath, walkable, nearestWalkable, groundAt, STEP } from './nav.js?v=9';
+import { SFX, SFX3D } from './sfx.js?v=9';
+import { puff, addDebris, burst, sparks, floorDecal, floatingText } from './effects.js?v=9';
+import { segSeg, segPoint, segDisc, slerpDir } from './geom.js?v=9';
+import { makeArrowMesh, ARROW_LEN } from './arrow.js?v=9';
+import { HIP, SH_X, SH_Y, L1, L2, THIGH, SHIN, REACH, ENEMY_TYPES, TYPE_ORDER, ATK, EW, PARRY, SHIELD_POSE, SHIELD_R, SHIELD_HP, STANCES, bloodMat, buildFighter, makeWeapon, makeShield, makeBlob, warmFaces } from './fighter.js?v=9';
 
 // =============================================================================
 // Gegner: menschliche Kämpfer mit echtem Kampfverhalten.
@@ -26,7 +26,8 @@ export const player = {
   blades: [],  // { a, b, vel, speed, twoHand, w }
   aim: null,   // { o, d } solange der Spieler mit gespanntem Bogen / geladener Armbrust zielt
   look: new THREE.Vector3(0, 0, -1), ranged: false, shieldStun: 0, // Blickrichtung · hält Fernwaffe · Schild weggetreten bis (Zeit)
-  hit() {}, blocked() {}, arrowStuck() {}, defeated() {}
+  hit() {}, blocked() {}, arrowStuck() {}, defeated() {},
+  dropped() { return false; } // eine Waffe/ein Schild fällt: main.js macht daraus eine aufhebbare Waffe (true = übernommen)
 };
 // Einstellungen: Schaden, Reaktionsvermögen und Tempo der Gegner, Texte, gleichzeitige Angreifer
 export const opts = { dmg: 1, react: 1, speed: 1, texts: true, tokens: 2 };
@@ -76,13 +77,16 @@ function setShield(e, kind) {
   toLocalPos(e, SHIELD_POSE.mid.c, e.sp.c); toLocalDir(e, SHIELD_POSE.mid.n, e.sp.n);
 }
 // Gegenstand fällt zu Boden (Waffe, Schild, Helm)
-function dropItem(e, obj, dir) {
+// item: Waffen-Kennung bzw. 'shield' – solche Gegenstände kann der Spieler aufheben
+function dropItem(e, obj, dir, item = null) {
   if (!obj) return;
   scene.attach(obj);
   const v = new THREE.Vector3(rand(-0.6, 0.6), rand(0.6, 1.6), rand(-0.6, 0.6));
   if (dir) v.addScaledVector(dir, 1.2);
-  addDebris(obj, v, 6);
   SFX.thud(0.3);
+  obj.updateMatrixWorld(true);
+  if (item && player.dropped(item, obj, v)) { scene.remove(obj); return; }
+  addDebris(obj, v, 6);
 }
 
 // Angriffsraum → Körper-Koordinaten (r = Waffenseite; bei Linkshändern gespiegelt)
@@ -118,6 +122,7 @@ export function spawnEnemy(head, o = {}) {
   });
   setWeapon(e, pick(T.weapons));
   if (T.shield) setShield(e, T.shield);
+  e.blob = makeBlob(); scene.add(e.blob);
   const opens = surfacesOf('door', 'window');
   if (o.at) {
     e.pos.copy(o.at).setY(0); e.y = groundAt(e.pos.x, e.pos.z);
@@ -143,6 +148,7 @@ export function spawnEnemy(head, o = {}) {
   return e;
 }
 function place(e) {
+  if (e.blob) { e.blob.position.set(e.pos.x, Math.max(e.y, 0) + 0.006, e.pos.z); e.blob.visible = e.state !== 'approach' && e.state !== 'exit' && (e.state !== 'dead' || e.t < 9); }
   e.root.position.set(e.pos.x, e.y, e.pos.z);
   e.root.rotation.y = e.yaw;
   e.root.updateMatrixWorld(true);
@@ -150,11 +156,12 @@ function place(e) {
 function removeEnemy(e) {
   release(e);
   scene.remove(e.root);
+  if (e.blob) scene.remove(e.blob);
   const i = enemies.indexOf(e);
   if (i >= 0) enemies.splice(i, 1);
 }
 export function clearEnemies() {
-  for (const e of enemies.splice(0)) scene.remove(e.root);
+  for (const e of enemies.splice(0)) { scene.remove(e.root); if (e.blob) scene.remove(e.blob); }
   tokens.clear();
   for (const s of shots.splice(0)) scene.remove(s.obj);
 }
@@ -303,15 +310,15 @@ export function applyHit(e, zone, info) {
 // Arm unbrauchbar: Waffe oder Schild fällt; wenn möglich wird mit der anderen Hand weitergekämpft
 function armLost(e, i, dir) {
   const isW = i === wArm(e);
-  if (e.weaponId === 'bow') { dropItem(e, e.weapon, dir); e.weapon = null; e.shot = null; if (isW) e.handed = -e.handed; setWeapon(e, armOk(e, wArm(e)) ? 'dagger' : 'fist'); return 'Bogen fällt!'; }
+  if (e.weaponId === 'bow') { dropItem(e, e.weapon, dir, 'bow'); e.weapon = null; e.shot = null; if (isW) e.handed = -e.handed; setWeapon(e, armOk(e, wArm(e)) ? 'dagger' : 'fist'); return 'Bogen fällt!'; }
   if (!isW) {
-    if (e.shield) { dropItem(e, e.shield, dir); e.shield = null; return 'Schild fällt!'; }
+    if (e.shield) { dropItem(e, e.shield, dir, 'shield'); e.shield = null; return 'Schild fällt!'; }
     return e.wdef.twoH ? 'Nur noch einhändig' : 'Arm unbrauchbar';
   }
-  if (e.weapon) { dropItem(e, e.weapon, dir); e.weapon = null; }
+  if (e.weapon) { dropItem(e, e.weapon, dir, e.weaponId); e.weapon = null; }
   if (e.act) { e.act = null; e.queue.length = 0; }
   if (armOk(e, 1 - i)) { // Schild weg, Dolch in die andere Hand
-    if (e.shield) { dropItem(e, e.shield, dir); e.shield = null; }
+    if (e.shield) { dropItem(e, e.shield, dir, 'shield'); e.shield = null; }
     e.handed = -e.handed;
     setWeapon(e, e.type === 'bandit' || e.type === 'archer' ? 'fist' : 'dagger');
   } else setWeapon(e, 'fist');
@@ -344,8 +351,8 @@ function kill(e, dir) {
   e.fallRoll = rand(-0.7, 0.7);
   if (e.downK > 0.6) { e.fall = -1; e.t = 0.95; e.fallRoll = 0; } // lag schon am Boden: bleibt liegen
   e.downK = 0; e.down = null;
-  dropItem(e, e.weapon, dir); e.weapon = null;
-  dropItem(e, e.shield, dir); e.shield = null;
+  dropItem(e, e.weapon, dir, e.weaponId); e.weapon = null;
+  dropItem(e, e.shield, dir, 'shield'); e.shield = null;
   SFX3D.death(chestWorld(e, t2), 'runner');
   player.defeated(e, 'dead');
 }
@@ -783,7 +790,7 @@ function archer(e, dt, d, dx, dz, sameLevel) {
   turnTo(e, player.head.x, player.head.z, dt, 4);
   e.twist = a.phase === 'draw' ? 0.6 : 0; // beim Spannen seitlich zum Ziel
   if (d < 1.25 && sameLevel) { // Nahkampf: Bogen fallen lassen, Dolch ziehen
-    dropItem(e, e.weapon, null); e.weapon = null; e.shot = null;
+    dropItem(e, e.weapon, null, 'bow'); e.weapon = null; e.shot = null;
     setWeapon(e, 'dagger');
     return;
   }
@@ -1087,7 +1094,15 @@ function pose(e, dt) {
   e.twistCur = damp(e.twistCur, -e.twist * e.handed, 14, dt);
   const wob = e.daze > 0 ? Math.sin(clock * 5) * 0.07 * Math.min(1, e.daze) : 0;
   e.torso.rotation.set(e.leanCur + F.lean, e.twistCur + F.tw, wob + sag * 1.2 * (e.limpSide || 0) + Math.sin(e.phase) * 0.03 * a);
-  e.head.rotation.set(-e.leanCur * 0.6 + (e.daze > 0 ? 0.15 : 0) + F.hx, -e.twistCur * 0.7 + F.hy, wob * 1.5);
+  // Blick: Kopf dreht sich gedämpft zum Spieler (begrenzt wie ein echter Hals)
+  let lookY = 0, lookX = 0;
+  if (fighting && !e.down && e.weaponId) {
+    const L = e.body.worldToLocal(t1.copy(player.head));
+    lookY = clamp(Math.atan2(L.x, L.z) - e.twistCur, -1.0, 1.0);
+    lookX = clamp(-Math.atan2(L.y - (e.hips.position.y + 1.1), Math.hypot(L.x, L.z)), -0.5, 0.45);
+  }
+  e.lookY = damp(e.lookY || 0, lookY, 7, dt); e.lookX = damp(e.lookX || 0, lookX, 7, dt);
+  e.head.rotation.set(e.lookX - e.leanCur * 0.5 + (e.daze > 0 ? 0.15 : 0) + F.hx, e.lookY + F.hy, wob * 1.5);
   // Waffe, Schild und Arme
   const wa = wArm(e), oa = 1 - wa, sw = Math.sin(e.phase) * a;
   if (e.weaponId === 'bow' && e.weapon) { archerPose(e); return; }
@@ -1231,6 +1246,22 @@ function deadUpdate(e, dt) {
   e.root.updateMatrixWorld(true);
 }
 // Knochen einer Trefferzone (z. B. damit ein Pfeil dort stecken bleibt)
+// Vorwärmen: alle Gesichter, Gegner-Typen, Waffen und Schilde einmal erzeugen (Geometrien, Texturen, Shader),
+// damit beim ersten Erscheinen im Kampf nichts ruckelt. Liefert eine Gruppe zum einmaligen Zeichnen.
+export function warmupGroup() {
+  warmFaces();
+  const g = new THREE.Group();
+  TYPE_ORDER.forEach((t, i) => {
+    const f = buildFighter(t);
+    f.root.position.set(i * 0.2, 0, 0);
+    for (const id of ENEMY_TYPES[t].weapons) f.body.add(makeWeapon(id));
+    if (ENEMY_TYPES[t].shield) f.body.add(makeShield(ENEMY_TYPES[t].shield, f.tunic));
+    g.add(f.root);
+  });
+  for (const id of ['dagger', 'fist']) g.add(makeWeapon(id));
+  const b = new THREE.Mesh(new THREE.SphereGeometry(0.05), bloodMat); g.add(b); g.add(makeBlob());
+  return g;
+}
 export function boneOf(e, zone) {
   return zone === 'head' ? e.head : zone === 'torso' ? e.torso : zone === 'armR' ? e.arms[0].top : zone === 'armL' ? e.arms[1].top : zone === 'legR' ? e.legs[0].top : e.legs[1].top;
 }

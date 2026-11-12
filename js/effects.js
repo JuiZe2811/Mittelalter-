@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { makePanel } from './util.js?v=8';
-import { heightAt } from './room.js?v=8';
-import { SFX } from './sfx.js?v=8';
+import { makePanel } from './util.js?v=9';
+import { heightAt } from './room.js?v=9';
+import { SFX } from './sfx.js?v=9';
 
 // Kurzlebige Effekte: Leuchtspuren, Partikel, Punkte-Text, Einschusslöcher, Hülsen
 let scene;
@@ -118,9 +118,20 @@ function updateParticles(dt) {
   pPoints.visible = any;
 }
 
+// Schwebende Texte: aus einem festen Vorrat wiederverwendet (kein neues Canvas/keine neue Textur pro Text)
+const textPool = [];
+function textPanel() {
+  let t = textPool.find(x => !x.busy);
+  if (!t) {
+    if (textPool.length >= 10) { t = textPool.reduce((a, b) => (a.life < b.life ? a : b)); t.e.life = 0; } // ältesten übernehmen
+    else { const panel = makePanel(0.6, 0.16, 600); panel.mesh.renderOrder = 20; panel.mesh.material.depthTest = false; t = { panel, busy: false, life: 0 }; textPool.push(t); }
+  }
+  return t;
+}
 export function floatingText(text, point, color) {
   if (!fx.popups && /^[+]/.test(text)) return;
-  const panel = makePanel(0.6, 0.16, 600);
+  const t = textPanel(), panel = t.panel;
+  if (t.e) { const k = effects.indexOf(t.e); if (k >= 0) effects.splice(k, 1); }
   panel.draw((ctx, w, h) => {
     ctx.font = 'bold 76px system-ui, sans-serif';
     const fit = Math.min(76, Math.floor(76 * (w * 0.94) / Math.max(1, ctx.measureText(text).width)));
@@ -134,20 +145,20 @@ export function floatingText(text, point, color) {
     ctx.fillText(text, w / 2, h / 2);
   });
   panel.mesh.position.copy(point);
-  panel.mesh.renderOrder = 20;
-  panel.mesh.material.depthTest = false;
+  panel.mesh.material.opacity = 1;
   panel.mesh.scale.setScalar(Math.max(0.8, point.distanceTo(headRef) / 4));
   panel.mesh.lookAt(headRef);
   scene.add(panel.mesh);
-  effects.push({
+  t.busy = true;
+  t.e = {
     obj: panel.mesh, life: 1.1, maxLife: 1.1,
-    update(dt, k) {
-      panel.mesh.position.y += dt * 0.4;
-      panel.mesh.material.opacity = Math.min(1, k * 2);
-    },
-    dispose() { panel.mesh.material.map.dispose(); panel.mesh.material.dispose(); panel.mesh.geometry.dispose(); }
-  });
+    update(dt, k) { t.life = k; panel.mesh.position.y += dt * 0.4; panel.mesh.material.opacity = Math.min(1, k * 2); },
+    dispose() { t.busy = false; t.e = null; }
+  };
+  effects.push(t.e);
 }
+// einmal einen Text erzeugen (Vorwärmen: Canvas, Textur, Shader)
+export function warmText() { for (let i = 0; i < 4; i++) { const t = textPanel(); t.busy = false; } }
 
 const holeGeo = new THREE.CircleGeometry(0.008, 10);
 const holeMat = new THREE.MeshBasicMaterial({ color: 0x111111 });

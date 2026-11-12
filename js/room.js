@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { addStaticBox, removeStatic } from './physics.js?v=8';
-import { mergeStatic } from './util.js?v=8';
+import { addStaticBox, removeStatic } from './physics.js?v=9';
+import { mergeStatic } from './util.js?v=9';
 
 // Raum-Modell: echte Wände, Tische und Stühle des Spielers.
 // Jede Fläche bekommt eine sichtbare Vorschau (im Einrichtungsmodus), einen unsichtbaren

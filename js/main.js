@@ -1,15 +1,17 @@
 import * as THREE from 'three';
-import { VERSION } from './version.js?v=8';
+import { VERSION } from './version.js?v=9';
 import { ARButton } from 'three/addons/webxr/ARButton.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { makePanel, panelBg, roundRect } from './util.js?v=8';
-import { SFX, SFX_PLAYER, ensureAudio, setListener, setVolumes, setAudioPaused } from './sfx.js?v=8';
-import { stepPhysics, addDynamic, removeDynamic, localBoxOf } from './physics.js?v=8';
-import { initEnemies, spawnEnemy, updateEnemies, clearEnemies, prepareNav, aliveCount, enemies, strikeTest, applyHit, shoveEnemy, hitShield, teamOpening, notifyShot, player, opts as combatOpts, pickType, ENEMY_TYPES, TYPE_ORDER } from './enemies.js?v=8';
-import { groundAt } from './nav.js?v=8';
-import { WEAPON_ORDER, WEAPONS, createWeapon, setBowString, setXbowString, xbowPull, initWeapons, shootArrow, throwBlade, updateFlying, clearFlying } from './weapons.js?v=8';
-import { room, addWall, addBox, makeWall, makeBox, rotateBox, removeSurface, clearRoom, setEditMode, suggestYaw, surfacesOf, importDetectedPlanes, saveRoom, loadRoom, hasSavedRoom, surfaceName, serializeRoom, deserializeRoom, roomSlots, saveRoomSlot, loadRoomSlot, addOpening, makeOpening, roomOccluders, setAtmosphere, closeRoomGaps, closeRoom, openWallEnds } from './room.js?v=8';
-import { initEffects, headRef, floatingText, updateEffects, updateDebris, fx, clearDebris, sparks } from './effects.js?v=8';
+import { makePanel, panelBg, roundRect } from './util.js?v=9';
+import { SFX, SFX_PLAYER, ensureAudio, setListener, setVolumes, setAudioPaused } from './sfx.js?v=9';
+import { segPoint } from './geom.js?v=9';
+import { stepPhysics, addDynamic, removeDynamic, localBoxOf } from './physics.js?v=9';
+import { initEnemies, spawnEnemy, updateEnemies, clearEnemies, prepareNav, aliveCount, enemies, strikeTest, applyHit, shoveEnemy, hitShield, teamOpening, notifyShot, player, opts as combatOpts, pickType, ENEMY_TYPES, TYPE_ORDER, warmupGroup } from './enemies.js?v=9';
+import { groundAt } from './nav.js?v=9';
+import { WEAPON_ORDER, WEAPONS, createWeapon, setBowString, setXbowString, xbowPull, initWeapons, shootArrow, throwWeapon, updateFlying, clearFlying } from './weapons.js?v=9';
+import { room, addWall, addBox, makeWall, makeBox, rotateBox, removeSurface, clearRoom, setEditMode, suggestYaw, surfacesOf, importDetectedPlanes, saveRoom, loadRoom, hasSavedRoom, surfaceName, serializeRoom, deserializeRoom, roomSlots, saveRoomSlot, loadRoomSlot, addOpening, makeOpening, roomOccluders, setAtmosphere, closeRoomGaps, closeRoom, openWallEnds } from './room.js?v=9';
+import { initEffects, headRef, floatingText, updateEffects, updateDebris, fx, clearDebris, sparks, warmText, burst } from './effects.js?v=9';
+const clamp = THREE.MathUtils.clamp;
 const hyp = (a, b, c = 0) => Math.sqrt(a * a + b * b + c * c); // schneller als Math.hypot und ohne Speicher-Müll
 
 // =============================================================================
@@ -121,8 +123,10 @@ const tipGeo = new THREE.SphereGeometry(0.008, 10, 8);
 const hands = [0, 1].map(i => {
   const ray = renderer.xr.getController(i);
   scene.add(ray);
+  const grip = renderer.xr.getControllerGrip(i); // Griff-Raum: Mitte der Handfläche, -Z entlang der geschlossenen Faust
+  scene.add(grip);
   const h = {
-    i, ray, src: null, handedness: i === 0 ? 'left' : 'right', btn: {}, prev: {}, stickX: 0, stickY: 0,
+    i, ray, grip, velHist: [], throwVel: new THREE.Vector3(), highlight: null, src: null, handedness: i === 0 ? 'left' : 'right', btn: {}, prev: {}, stickX: 0, stickY: 0,
     point: new THREE.Vector3(), tip: new THREE.Vector3(), quat: new THREE.Quaternion(), uiHover: null,
     held: null, drawing: null, pull: null, grip2: null, hist: [], vel: new THREE.Vector3(), angVel: new THREE.Vector3()
   };
@@ -141,7 +145,8 @@ const hands = [0, 1].map(i => {
   return h;
 });
 const BTN = { trigger: 0, squeeze: 1, stick: 3, a: 4, b: 5 };
-const handPoint = (h, out) => out.setFromMatrixPosition(tmpM.multiplyMatrices(h.ray.matrixWorld, HOLD_OFFSET));
+const hasGrip = (h) => h.grip.visible && settings.gripSpace;
+const handPoint = (h, out) => (hasGrip(h) ? out.setFromMatrixPosition(h.grip.matrixWorld) : out.setFromMatrixPosition(tmpM.multiplyMatrices(h.ray.matrixWorld, HOLD_OFFSET)));
 function readInputs() {
   for (const h of hands) {
     h.prev = h.btn;
@@ -164,6 +169,10 @@ function readInputs() {
       const angle = 2 * Math.acos(Math.min(1, dq.w)), sn = Math.sqrt(1 - dq.w * dq.w);
       if (sn > 1e-4) h.angVel.set(dq.x / sn, dq.y / sn, dq.z / sn).multiplyScalar(angle / dt); else h.angVel.set(0, 0, 0);
     }
+    // Wurf-Geschwindigkeit: die schnellste Handbewegung der letzten 0,1 s (beim Loslassen bremst die Hand schon ab)
+    h.velHist.push({ v: h.vel.clone(), t: elapsed });
+    while (h.velHist.length && elapsed - h.velHist[0].t > 0.1) h.velHist.shift();
+    h.throwVel.copy(h.velHist.reduce((m, x) => (x.v.lengthSq() > m.lengthSq() ? x.v : m), h.vel));
   }
 }
 const down = (h, k) => h.btn[k] && !h.prev[k];
@@ -202,6 +211,7 @@ function updateHandsXR(dt) {
     if (!h.src) { h.pointer.visible = false; continue; }
     h.tipMarker.visible = state === 'setup' && setup.tool === 'floor';
     const free = !h.held && !h.drawing && !h.pull && !h.grip2;
+    const wasHolding = !!h.held;
     // Zeigestrahl (im Einrichtungsmodus als Laser bis zum Boden / zur Wand)
     let pt = null;
     if ((free || weaponPanel.visible) && !(setup.drag && setup.drag.src === h)) pt = pointerTarget(h);
@@ -221,13 +231,20 @@ function updateHandsXR(dt) {
     const hover = pt && pt.kind === 'ui' ? pt.panel.buttonAt(pt.uv) : null;
     if (h.uiHover !== hover) { if (h.uiHover) h.uiHover.panel.setHover(null); h.uiHover = hover; if (hover) { hover.panel.setHover(hover); pulse(h, 0.1, 10); } }
 
+    // Waffe in Greifweite: leicht vergrößert + kurzes Vibrieren
+    const near = free && state !== 'setup' ? weaponNear(h) : null;
+    if (near !== h.highlight) {
+      if (h.highlight && !h.highlight.holder) h.highlight.root.scale.setScalar(1);
+      if (near) { near.root.scale.setScalar(1.08); pulse(h, 0.2, 15); }
+      h.highlight = near;
+    }
     // A/X: Waffen-Menü öffnen/schließen
     if (down(h, 'a') && (state === 'playing' || state === 'menu')) toggleWeaponMenu();
     // Griff-Taste: Sehne greifen (andere Hand hält den Bogen), Waffe nehmen oder per Laser heranziehen
     if (down(h, 'squeeze') && free && state !== 'setup') {
       const ow = otherHand(h).held;
       if (ow && ow.def.bow && !ow.loaded && h.point.distanceTo(ow.model.localToWorld(ow.nock.clone())) < 0.25) { h.drawing = ow; ow.draw = 0; SFX.click(500, 0.3, 0.05); pulse(h, 0.4, 30); }
-      else if (ow && ow.def.twoHand && !ow.second && h.point.distanceTo(ow.root.localToWorld(ow.grip2.clone())) < 0.17) { // Schwert beidhändig fassen
+      else if (ow && ow.def.twoHand && !ow.second && (h.point.distanceTo(ow.root.localToWorld(ow.grip2.clone())) < 0.22 || segPoint(ow.root.localToWorld(ow.ga.clone()), ow.root.localToWorld(ow.gb.clone()), h.point) < 0.09)) { // beidhändig fassen (Griff, Schaft oder Klinge)
         ow.second = h; h.grip2 = ow; SFX.grab(); pulse(h, 0.5, 40); pulse(otherHand(h), 0.3, 30);
       } else {
         const w = weaponNear(h);
@@ -235,8 +252,13 @@ function updateHandsXR(dt) {
         else if (pt && pt.kind === 'weapon') { h.pull = { w: pt.w }; SFX.whoosh(); }
       }
     }
+    // Loslassen: Sehne und zweite Hand immer beim Loslassen der Griff-Taste; die Waffe selbst je nach Einstellung
+    if (up(h, 'squeeze')) {
+      if (h.drawing || h.grip2) releaseHand(h);
+      else if (settings.grip === 'hold' && !h.keepUntilSqueeze) releaseHand(h);
+    }
+    if (down(h, 'squeeze') && settings.grip === 'toggle' && wasHolding && h.held && !h.keepUntilSqueeze) releaseHand(h); // Tippen: nochmal drücken = loslassen
     if (down(h, 'squeeze')) h.keepUntilSqueeze = false;
-    if (up(h, 'squeeze') && !h.keepUntilSqueeze) releaseHand(h);
 
     // Abzug: UI klicken bzw. Raum-Werkzeug
     if (!hover && down(h, 'trigger') && h.held && h.held.def.crossbow) fireCrossbow(h.held, h);
@@ -294,8 +316,8 @@ function updateDust(dt) {
 // =============================================================================
 const QUALITY = {
   quality: { scale: 1.0, fov: 0.5, shadowEvery: 1, shadowMap: 1024, soft: true, env: true },
-  balanced: { scale: 0.9, fov: 1, shadowEvery: 2, shadowMap: 1024, soft: false, env: false },
-  fast: { scale: 0.75, fov: 1, shadowEvery: 3, shadowMap: 512, soft: false, env: false }
+  balanced: { scale: 0.9, fov: 1, shadowEvery: 1, shadowMap: 1024, soft: false, env: false },
+  fast: { scale: 0.75, fov: 1, shadowEvery: 1, shadowMap: 512, soft: false, env: false }
 };
 const Q = () => QUALITY[settings.quality] || QUALITY.balanced;
 function applyQuality() {
@@ -329,7 +351,7 @@ function autoPerf(raw) {
   const target = 1 / ((session && session.frameRate) || 72);
   perf.ema += (raw - perf.ema) * 0.05;
   if (perf.ema > target * 1.3) { perf.slowT += raw; perf.okT = 0; } else { perf.slowT = Math.max(0, perf.slowT - raw); perf.okT += raw; }
-  if (perf.slowT > 2.5) {
+  if (perf.slowT > 1.2) {
     perf.slowT = 0;
     perf.ema = target;
     if (!perf.lowHz && session && (session.frameRate || 72) > 73) { perf.lowHz = true; applyFrameRate(); return; }
@@ -372,6 +394,12 @@ const SETTINGS_TABS = {
     { key: 'blood', label: 'Blut', opts: [[0, 'Aus'], [1, 'An']] }
   ] },
   bedienung: { label: '✊ Bedienung', items: [
+    { key: 'grip', label: 'Griff-Taste', opts: [['hold', 'Halten'], ['toggle', 'Tippen = festhalten']] },
+    { key: 'gripAngle', label: 'Griffwinkel der Waffen', opts: [[-30, '−30°'], [-15, '−15°'], [0, '0°'], [15, '+15°'], [30, '+30°']] },
+    { key: 'gripSpace', label: 'Waffe sitzt in der Handfläche', opts: onOff },
+    { key: 'weight', label: 'Gewicht spürbar (Trägheit)', opts: [[0, 'Aus'], [0.5, 'Leicht'], [1, 'Normal']] },
+    { key: 'trails', label: 'Schwung-Spuren', opts: onOff },
+    { key: 'throwBoost', label: 'Wurfkraft', opts: [[1, 'Normal'], [1.3, 'Stärker'], [1.6, 'Sehr stark']] },
     { key: 'haptics', label: 'Vibration', opts: [[0, 'Aus'], [0.5, 'Schwach'], [1, 'Normal'], [1.5, 'Stark']] }
   ] },
   grafik: { label: '✨ Grafik', items: [
@@ -380,15 +408,16 @@ const SETTINGS_TABS = {
     { key: 'particles', label: 'Partikel', opts: [[0.5, 'Wenig'], [1, 'Normal'], [1.6, 'Viel']] },
     { key: 'dust', label: 'Staub in der Luft', opts: onOff },
     { key: 'frameRate', label: 'Bildrate (Brille)', opts: [[72, '72 Hz'], [90, '90 Hz'], [120, '120 Hz']] },
-    { key: 'autoPerf', label: 'Automatisch flüssig halten', opts: onOff }
+    { key: 'autoPerf', label: 'Automatisch flüssig halten', opts: onOff },
+    { key: 'fps', label: 'Bildrate anzeigen', opts: onOff }
   ] }
 };
 const SETTINGS_DEFAULT = {
   master: 9, sfx: 10, music: 6, voices: 10, announcer: 10, announcerVoice: 'deep',
-  haptics: 1, popups: true, difficulty: 'normal', blood: 1,
-  quality: 'balanced', shadows: true, particles: 1, dust: true, frameRate: 90, autoPerf: true
+  haptics: 1, popups: true, difficulty: 'normal', blood: 1, grip: 'hold', gripAngle: 0, gripSpace: true, weight: 1, trails: true, throwBoost: 1.3, fps: false,
+  quality: 'balanced', shadows: false, particles: 1, dust: true, frameRate: 90, autoPerf: true
 };
-const settings = Object.assign({}, SETTINGS_DEFAULT, { shadows: shadowsOn }, load('burg-einstellungen', {}));
+const settings = Object.assign({}, SETTINGS_DEFAULT, load('burg-einstellungen', {}));
 let voiceOn = settings.announcer > 0;
 function applySettings() {
   setVolumes({ master: settings.master / 10, sfx: settings.sfx / 10, music: settings.music / 10, voices: settings.voices / 10 });
@@ -1131,7 +1160,7 @@ function finishSetup() {
 // Waffen in der Welt: schweben zu Beginn vor dem Spieler, lassen sich greifen, fallen mit Physik herunter
 // =============================================================================
 const arsenal = []; // alle Waffen in der Welt (aus dem Waffen-Menü geholt)
-const MAX_WEAPONS = 12;
+const MAX_WEAPONS = 16;
 function newWeapon(id) {
   const w = createWeapon(id);
   scene.add(w.root);
@@ -1153,7 +1182,7 @@ function giveWeapon(id, h = null) {
   const w = newWeapon(id);
   if (!renderer.xr.isPresenting) { equipDesk(w); return w; }
   const target = [h, h && otherHand(h), ...hands].find(x => x && x.src && !x.held && !x.drawing);
-  if (target) { takeWeapon(w, target); target.keepUntilSqueeze = true; }
+  if (target) { takeWeapon(w, target); target.keepUntilSqueeze = settings.grip === 'hold'; }
   else placeOnRackOne(w, true);
   return w;
 }
@@ -1164,7 +1193,8 @@ function freeWeapon(w) { // aus Hand/Physik/Flug lösen
   for (const h of hands) { if (h.drawing === w) h.drawing = null; if (h.pull && h.pull.w === w) h.pull = null; }
   if (w.phys) { removeDynamic(w.phys); w.phys = null; }
   if (w.root.parent !== scene) scene.attach(w.root);
-  w.thrown = false; w.desk = false;
+  w.thrown = false; w.desk = false; w.stuckWall = false;
+  if (w.embed) w.embed = null;
   if (w.def.bow) setBowString(w, null);
 }
 // Alle Waffen (außer gehaltenen, wenn keep) vor den Spieler zurückholen – schwebend, griffbereit
@@ -1206,13 +1236,23 @@ function takeWeapon(w, h) {
   w.floating = false;
   w.holder = h;
   h.held = w;
+  w.slide = 0; w.smoothQ = null; w.root.scale.setScalar(1);
+  if (w.grip2) { // Stielwaffe: die Hand bleibt dort am Schaft, wo sie zugegriffen hat
+    w.root.updateMatrixWorld(true);
+    const ax = w.gb.clone().sub(w.ga).normalize(), L = w.root.worldToLocal(h.point.clone()), t = L.dot(ax);
+    if (L.clone().addScaledVector(ax, -t).length() < 0.25) w.slide = clamp(t, -(w.ga.length() - 0.1), 0.45);
+  }
+  if (w.embed) { // aus dem Gegner ziehen: Wunde blutet
+    const e = w.embed.e; w.embed = null;
+    if (e.state !== 'dead') { e.bleed = Math.min(2.5, e.bleed + 0.8); burst(w.root.getWorldPosition(new THREE.Vector3()), 0x8a0a0a, 10); SFX.thunk(); }
+  }
   SFX.grab();
   pulse(h, 0.5, 40);
 }
 function weaponNear(h) {
-  let best = null, bd = 0.1;
+  let best = null, bd = 0.13;
   for (const w of arsenal) {
-    if (w.holder || w.thrown || !w.root.visible) continue;
+    if (w.holder || w.thrown || !w.root.visible || w.desk) continue;
     const d = new THREE.Box3().setFromObject(w.root).distanceToPoint(h.point);
     if (d < bd) { bd = d; best = w; }
   }
@@ -1228,18 +1268,23 @@ function releaseHand(h) {
   w.holder = null;
   // Bogen loslassen: Sehne der anderen Hand ebenfalls lösen
   for (const o of hands) if (o.drawing === w) { o.drawing = null; setBowString(w, null); }
-  const speed = h.vel.length();
-  if (w.def.throwable && speed > 2.5) { // Dolch werfen
-    w.thrown = true;
-    throwBlade(w, h.vel.clone().multiplyScalar(1.25), (ww, v) => { ww.thrown = false; makeLooseW(ww, v); });
-    return;
-  }
+  const tv = h.throwVel.clone().multiplyScalar(settings.throwBoost);
+  if (tv.length() > 2.6 && state !== 'setup') { launch(w, tv, h.angVel); return; } // im Schwung losgelassen = Wurf
   makeLooseW(w, h.vel.clone(), h.angVel.clone());
+}
+// Wurf: jede Waffe fliegt und trifft (Spitze voran oder sich überschlagend); landet sie, gilt wieder Physik
+function launch(w, vel, angVel) {
+  w.thrown = true;
+  throwWeapon(w, vel, angVel, (ww, v, info) => {
+    ww.thrown = false;
+    if (info && info.embed) { ww.embed = info.embed; ww.floating = false; return; }      // steckt im Gegner
+    if (info && info.wall) { ww.floating = false; ww.stuckWall = true; return; }          // steckt in Wand/Tisch
+    makeLooseW(ww, v || new THREE.Vector3());
+  });
 }
 
 // ---- Nahkampf: echte Klingenbahn. Hieb (Schneide voran) oder Stich (entlang der Klinge) ----------
 const _mb = new THREE.Vector3(), _mt = new THREE.Vector3();
-const clamp = THREE.MathUtils.clamp;
 // Klingenpunkte und Geschwindigkeit aktualisieren (auch für Paraden gegen Angriffe der Gegner)
 function bladeState(w, dt) {
   const base = w.root.localToWorld(w.base.clone()), tip = w.root.localToWorld(w.tip.clone());
@@ -1267,7 +1312,7 @@ function meleeUpdate(w, dt, h) {
   for (let i = 1; i <= n && !hit; i++) hit = strikeTest(_mb.lerpVectors(s.pb, s.base, i / n), _mt.lerpVectors(s.pt, s.tip, i / n), kind === 'blunt' ? 0.04 : 0.012);
   if (!hit) return;
   w.spentUntil = elapsed + 0.38; // der Schwung ist verbraucht
-  if (hit.kind !== 'body') { enemyBlocked(hit, h, M.shield || 3); return; }
+  if (hit.kind !== 'body') { enemyBlocked(hit, h, M.shield || 3); kickWeapon(w, 0.3); return; }
   const two = w.twoHand ? 1 : 0, grip = w.def.needTwo && !two ? 0.6 : 1; // Kriegshammer einhändig: schwach
   const sp = clamp(w.tipSpeed / 3.2, 0.45, 1.7);
   let type, power, flat = false;
@@ -1284,6 +1329,7 @@ function meleeUpdate(w, dt, h) {
   }
   const r = applyHit(hit.e, hit.zone, { type, power, pen: M.pen || 0, knockdown: !!M.knock && !!two && sp > 0.85, dir: w.tipVel.clone().normalize(), point: hit.point, knock: w.def.mass > 1.3 ? 1.2 : 0.5 });
   onEnemyHit(hit, r, { type, flat });
+  kickWeapon(w, r.armor ? 0.22 : 0.08);
   if (h) pulse(h, r.killed ? 1 : r.armor ? 0.9 : 0.7, r.killed ? 100 : 55);
   if (w.second) pulse(w.second, 0.6, 50);
 }
@@ -1440,6 +1486,7 @@ function playerHit(info) {
 function playerBlocked(info) {
   const w = info.w, h = w && w.holder;
   const n = tmpV.subVectors(headPos, info.point).normalize();
+  kickWeapon(w, info.how === 'weak' ? 0.4 : 0.25);
   if (info.how === 'shield') { SFX.clang(); SFX.thud(0.5); sparks(info.point, n, 10); pulse(h, info.heavy ? 1 : 0.85, info.heavy ? 150 : 90); }
   else if (info.how === 'parry') {
     SFX.clang(); SFX.pin(); sparks(info.point, n, 14); pulse(h, 1, 70);
@@ -1517,12 +1564,15 @@ hud.mesh.renderOrder = 6;
 hud.mesh.visible = false;
 scene.add(hud.mesh);
 let hudKey = '';
+let fpsEma = 0, fpsShown = 0;
 function updateHud() {
-  const show = state === 'playing';
-  const txt = `❤ ${Math.ceil(playerHp)}   ⚔ ${kills}`;
+  const show = state === 'playing' || settings.fps;
+  if (prof.lastDt > 0) fpsEma += (1 / prof.lastDt - fpsEma) * 0.05;
+  if (Math.abs(fpsEma - fpsShown) >= 1) fpsShown = Math.round(fpsEma);
+  const txt = `❤ ${Math.ceil(playerHp)}   ⚔ ${kills}` + (settings.fps ? `   ${fpsShown} fps` : '');
   if (!renderer.xr.isPresenting) {
     statusEl.style.display = show || enemies.length ? 'block' : 'none';
-    statusEl.textContent = `${txt}\n${deskW ? deskW.def.icon + ' ' + deskW.def.name : 'keine Waffe'}${deskShield ? ' + 🛡 Schild' : ''}\n1–9 Waffen · Klick Hieb/Schlag · E Stich · Leertaste Deckung · F Dolch werfen · Q Waffen-Menü`;
+    statusEl.textContent = `${txt}\n${deskW ? deskW.def.icon + ' ' + deskW.def.name : 'keine Waffe'}${deskShield ? ' + 🛡 Schild' : ''}\n1–9, 0 Waffen · Klick Hieb/Schlag · E Stich · Leertaste Deckung · F werfen · Q Waffen-Menü`;
     hud.mesh.visible = false;
     return;
   }
@@ -1538,25 +1588,101 @@ function updateHud() {
 }
 
 // ---- Waffen jedes Bild aktualisieren ---------------------------------------------------
+// ---- Haltung der Waffe in der Hand ---------------------------------------------------------------
+// Nahkampfwaffen sitzen im Griff-Raum der Hand (Handfläche, Klinge verlängert die Faust) – mit einstellbarem
+// Griffwinkel. Bogen, Armbrust und Schild richten sich nach dem Zeigestrahl.
+const _hm = new THREE.Matrix4(), _hr = new THREE.Matrix4(), _hp = new THREE.Vector3(), _hq = new THREE.Quaternion(), _ax = new THREE.Vector3();
+function holdTarget(w, h) {
+  const ang = THREE.MathUtils.degToRad(settings.gripAngle || 0);
+  if (w.def.melee && hasGrip(h)) _hm.copy(h.grip.matrixWorld).multiply(_hr.makeRotationX(-w.tilt0 + ang));
+  else { _hm.multiplyMatrices(h.ray.matrixWorld, HOLD_OFFSET); if (w.def.melee && ang) _hm.multiply(_hr.makeRotationX(ang)); }
+  if (w.slide) { _ax.copy(w.gb).sub(w.ga).normalize().multiplyScalar(-w.slide); _hm.multiply(_hr.makeTranslation(_ax.x, _ax.y, _ax.z)); }
+  _hm.decompose(_hp, _hq, tmpS);
+}
+function poseHeld(w, dt) {
+  const h = w.holder;
+  holdTarget(w, h);
+  // Gewicht: schwere Waffen folgen der Drehung der Hand etwas träge (beidhändig doppelt so schnell)
+  const wt = settings.weight * (w.def.melee ? 1 : 0.4);
+  if (wt > 0 && w.smoothQ && dt > 0) {
+    const rate = 32 / (w.def.mass * wt) * (w.twoHand ? 2 : 1);
+    w.smoothQ.slerp(_hq, 1 - Math.exp(-dt * rate));
+  } else w.smoothQ = (w.smoothQ || new THREE.Quaternion()).copy(_hq);
+  w.root.position.copy(_hp);
+  w.root.quaternion.copy(w.smoothQ);
+  // zweite Hand: Schwert, Hammer, Speer beidhändig – die Waffe zeigt von der hinteren zur vorderen Hand
+  if (w.second) {
+    const d1 = tmpV.subVectors(h.point, w.second.point), len = d1.length();
+    w.twoHand = len > 0.07;
+    if (w.twoHand) {
+      d1.divideScalar(len);
+      const d0 = tmpV2.subVectors(w.tip, w.base).normalize().applyQuaternion(w.root.quaternion);
+      if (d0.dot(d1) < 0) d1.negate();
+      w.root.quaternion.premultiply(tmpQ.setFromUnitVectors(d0, d1));
+      w.smoothQ.copy(w.root.quaternion);
+    }
+  }
+  // Rückprall nach einem Treffer oder Block: die Klinge federt kurz zurück
+  if (w.kickT > 0) { w.kickT = Math.max(0, w.kickT - dt); w.root.rotateX(w.kickAmt * Math.sin(w.kickT / 0.16 * Math.PI)); }
+  w.root.updateMatrixWorld(true);
+}
+const kickWeapon = (w, amt) => { if (w) { w.kickT = 0.16; w.kickAmt = amt; } };
+
+// ---- Schwung-Spur und Schwung-Geräusch --------------------------------------------------------------
+const TRAIL_N = 9;
+const trailMat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false });
+function makeTrail() {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(TRAIL_N * 2 * 3), 3));
+  const col = new Float32Array(TRAIL_N * 2 * 3);
+  for (let k = 0; k < TRAIL_N; k++) { const a = 0.6 * (k / (TRAIL_N - 1)) ** 1.3; for (const j of [0, 1]) col.set([a, a, a * 1.1], (k * 2 + j) * 3); }
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const idx = [];
+  for (let k = 0; k < TRAIL_N - 1; k++) { const a = k * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+  g.setIndex(idx);
+  const m = new THREE.Mesh(g, trailMat);
+  m.frustumCulled = false; m.renderOrder = 8; m.visible = false;
+  scene.add(m);
+  return { mesh: m, pts: [] };
+}
+function trailUpdate(w, h) {
+  const fast = w.tipSpeed > w.def.melee.minSpeed * 1.15;
+  // Geräusch und leichtes Vibrieren beim kräftigen Schwung
+  if (w.tipSpeed > w.def.melee.minSpeed * 1.5 && !w.whoosh) { w.whoosh = true; SFX.whoosh(); }
+  else if (w.tipSpeed < w.def.melee.minSpeed * 0.8) w.whoosh = false;
+  if (fast && h && (frameNo & 1)) pulse(h, Math.min(0.3, w.tipSpeed / 25), 12);
+  if (!settings.trails || w.id === 'stone') return;
+  const T = w.trail || (w.trail = makeTrail());
+  if (fast && w.prevBase) T.pts.push([w.prevBase.clone(), w.prevTip.clone()]);
+  else if (T.pts.length) T.pts.shift();
+  while (T.pts.length > TRAIL_N) T.pts.shift();
+  T.mesh.visible = T.pts.length > 1;
+  if (!T.mesh.visible) return;
+  const pos = T.mesh.geometry.attributes.position;
+  for (let k = 0; k < TRAIL_N; k++) {
+    const P = T.pts[Math.max(0, T.pts.length - TRAIL_N + k)] || T.pts[0];
+    pos.setXYZ(k * 2, P[0].x, P[0].y, P[0].z); pos.setXYZ(k * 2 + 1, P[1].x, P[1].y, P[1].z);
+  }
+  pos.needsUpdate = true;
+}
+const hideTrail = (w) => { if (w.trail) { w.trail.pts.length = 0; w.trail.mesh.visible = false; } };
+
+// ---- Waffen jedes Bild aktualisieren ---------------------------------------------------
+let frameNo = 0;
 function updateWeapons(dt) {
+  frameNo++;
   for (const w of arsenal) {
     if (w.floating) poseFloating(w, elapsed);
     else if (w.holder) {
-      tmpM.multiplyMatrices(w.holder.ray.matrixWorld, HOLD_OFFSET);
-      tmpM.decompose(w.root.position, w.root.quaternion, tmpS);
-      if (w.second) { // Schwert beidhändig: die zweite Hand am Knauf führt die Klinge mit
-        const d1 = tmpV.subVectors(w.holder.point, w.second.point);
-        w.twoHand = d1.length() > 0.07;
-        if (w.twoHand) {
-          d1.normalize();
-          const d0 = tmpV2.subVectors(w.tip, w.base).normalize().applyQuaternion(w.root.quaternion);
-          if (d0.dot(d1) > 0.1) w.root.quaternion.premultiply(tmpQ.setFromUnitVectors(d0, d1));
-        }
-      }
-      w.root.updateMatrixWorld(true);
-      if (w.def.melee) meleeUpdate(w, dt, w.holder);
+      poseHeld(w, dt);
+      if (w.def.melee) { meleeUpdate(w, dt, w.holder); trailUpdate(w, w.holder); }
       else if (w.def.shield) shieldUpdate(w, dt, w.holder);
+      continue;
     } else if (w.desk) deskWeaponUpdate(w, dt);
+    else if (w.embed && w.embed.e.state === 'dead') { // Gegner fällt: die Waffe rutscht aus der Wunde
+      w.embed = null; scene.attach(w.root); makeLooseW(w, new THREE.Vector3(0, 0.5, 0));
+    }
+    hideTrail(w);
   }
   for (const h of hands) if (h.drawing) bowUpdate(h);
   // Pull: Waffe fliegt per Laser + Griff-Taste in die Hand
@@ -1564,11 +1690,25 @@ function updateWeapons(dt) {
     if (!h.pull) continue;
     const w = h.pull.w;
     if (w.phys) { removeDynamic(w.phys); w.phys = null; }
+    if (w.embed) { scene.attach(w.root); }
     w.floating = false;
     w.root.position.lerp(h.point, Math.min(1, dt * 9));
     if (w.root.position.distanceTo(h.point) < 0.15) { h.pull = null; takeWeapon(w, h); }
   }
 }
+// Waffen der Gegner, die zu Boden fallen, werden zu Waffen, die du aufheben kannst
+const DROP_MAP = { sword: 'sword', dagger: 'dagger', mace: 'mace', club: 'mace', axe: 'axe', spear: 'spear', halberd: 'spear', bow: 'bow', shield: 'shield' };
+player.dropped = (item, obj, vel) => {
+  const id = DROP_MAP[item];
+  if (!id || !arsenal.length && false) return false;
+  const w = newWeapon(id);
+  obj.getWorldPosition(w.root.position);
+  obj.getWorldQuaternion(w.root.quaternion);
+  if (!WEAPONS[id].shield) w.root.rotateX(Math.PI / 2); // Gegner-Waffen zeigen entlang +Y, eigene entlang -Z
+  w.root.updateMatrixWorld(true);
+  makeLooseW(w, vel);
+  return true;
+};
 
 // =============================================================================
 // Spielablauf: Menü → START → Skelette kommen durch Türen & Fenster → Pause/Hauptmenü
@@ -1709,12 +1849,12 @@ function refreshWeaponMenu() {
   weaponPanel.set((ctx, w) => {
     text(ctx, '🗡 Waffen-Menü', w / 2, 40, 40, '#fff', 'center', true);
     text(ctx, renderer.xr.isPresenting ? 'Waffe anklicken → sie kommt in die Hand, mit der du klickst.' : 'Waffe anklicken → du hast sie in der Hand (Schild links).', w / 2, 84, 21, '#cfd8e3');
-    text(ctx, renderer.xr.isPresenting ? 'Loslassen: Griff-Taste drücken und loslassen · Menü auf/zu: A/X' : 'Menü auf/zu: Q · Waffen auch mit 1–9', w / 2, 110, 19, '#9ad');
+    text(ctx, renderer.xr.isPresenting ? 'Loslassen: Griff-Taste drücken und loslassen · Menü auf/zu: A/X' : 'Menü auf/zu: Q · Waffen auch mit 1–9 und 0 · F = werfen', w / 2, 110, 19, '#9ad');
     text(ctx, 'Übungsgegner – „Passiv“ steht still, „Duell“ kämpft gegen dich:', w / 2, 368, 19, '#9ad');
     if (weaponMsg) text(ctx, weaponMsg, w / 2, 526, weaponMsg.length > 60 ? 16 : 20, '#7dffa8', 'center', true);
     text(ctx, `${arsenal.length} Waffen · ${enemies.length} Gegner im Raum`, w - 24, 630, 17, '#6b7a90', 'right');
   }, [
-    ...[0, 1, 2].flatMap(r => row(132 + r * 74, 66, WEAPON_ORDER.slice(r * 3, r * 3 + 3).map(id => ({ id: 'w_' + id, label: `${WEAPONS[id].icon} ${WEAPONS[id].name}`, font: 25, onClick: () => pickWeapon(id) })), W, 30, 12)),
+    ...[0, 1, 2].flatMap(r => row(132 + r * 74, 66, WEAPON_ORDER.slice(r * 4, r * 4 + 4).map(id => ({ id: 'w_' + id, label: `${WEAPONS[id].icon} ${WEAPONS[id].name}`, font: 19, onClick: () => pickWeapon(id) })), W, 24, 10)),
     ...row(384, 54, [
       { id: 'ttype', label: `◀ ${T.name} ▶`, font: 24, onClick: () => { trainType = TYPE_ORDER[(TYPE_ORDER.indexOf(trainType) + 1) % TYPE_ORDER.length]; weaponMsg = ''; refreshWeaponMenu(); } },
       { id: 'dummy', label: '🎯 Passiv', font: 24, onClick: () => { spawnTrainer(true); weaponMsg = `${T.name} steht vor dir – wehrt sich nicht`; refreshWeaponMenu(); } },
@@ -1746,7 +1886,7 @@ function spawnTrainer(passive) {
 // Steuerung am PC (zum Testen ohne Brille)
 // =============================================================================
 const mouseNdc = new THREE.Vector2();
-let lookYaw = 0, lookPitch = -0.2, rightDrag = false, lastX = 0, lastY = 0;
+let camYaw = 0, camPitch = -0.2, lookYaw = 0, lookPitch = -0.2, rightDrag = false, lastX = 0, lastY = 0;
 const keys = new Set();
 let deskW = null, deskShield = null, deskDraw = 0, deskDrawing = false, deskGuard = false, deskGuardT = -9;
 // PC: Waffe vor die Kamera nehmen (Schild in die linke Hand, andere Waffen rechts)
@@ -1819,15 +1959,16 @@ function deskWeaponUpdate(w, dt) {
   w.root.updateWorldMatrix(true, true);
   if (w.def.melee) bladeState(w, dt);
 }
-function deskThrowDagger() {
-  const w = deskW;
-  if (!w || !w.def.throwable) return;
-  deskW = null;
+// PC: F wirft die Waffe in der Hand dorthin, wo das Fadenkreuz zeigt
+function deskThrow() {
+  const w = deskW || deskShield;
+  if (!w) return;
+  if (w === deskW) deskW = null; else deskShield = null;
   freeWeapon(w);
   raycaster.setFromCamera(mouseNdc, camera);
   w.root.position.copy(raycaster.ray.origin).addScaledVector(raycaster.ray.direction, 0.4);
-  w.thrown = true;
-  throwBlade(w, raycaster.ray.direction.clone().multiplyScalar(12).add(new THREE.Vector3(0, 1, 0)), (ww, v) => { ww.thrown = false; makeLooseW(ww, v); });
+  w.root.updateMatrixWorld(true);
+  launch(w, raycaster.ray.direction.clone().multiplyScalar(12).add(new THREE.Vector3(0, 1, 0)), null);
 }
 function updateDesktopBow(dt) {
   const w = deskW;
@@ -1895,8 +2036,8 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') startPressed();
   if (state !== 'setup') {
     const n = parseInt(e.key, 10);
-    if (n >= 1 && n <= 9) equipDesk(WEAPON_ORDER[n - 1]);
-    if (e.key === 'f' || e.key === 'F') deskThrowDagger();
+    if (n >= 0 && n <= 9 && e.key.length === 1) equipDesk(WEAPON_ORDER[n === 0 ? 9 : n - 1]);
+    if (e.key === 'f' || e.key === 'F') deskThrow();
     if (e.key === 'e' || e.key === 'E') deskAttack(true);
     if (e.code === 'Space' && !deskGuard) { deskGuard = true; deskGuardT = elapsed; e.preventDefault(); }
     if ((e.key === 'q' || e.key === 'Q') && (state === 'playing' || state === 'menu')) toggleWeaponMenu();
@@ -2037,6 +2178,17 @@ camera.rotation.set(lookPitch, lookYaw, 0, 'YXZ');
 camera.updateMatrixWorld(true);
 buildDemoRoom();
 enterMenu();
+// Vorwärmen: Gegner, Waffen, Gesichter, Texte einmal erzeugen und die Shader übersetzen – kein Ruckeln beim ersten Auftauchen
+(function warmup() {
+  const g = warmupGroup();
+  for (const id of WEAPON_ORDER) g.add(createWeapon(id).root);
+  g.position.set(0, -50, 0);
+  scene.add(g);
+  warmText();
+  scene.updateMatrixWorld();
+  try { renderer.compile(scene, camera); g.traverse(o => { if (o.material && o.material.map) renderer.initTexture(o.material.map); }); } catch { /* egal */ }
+  scene.remove(g);
+})();
 
 // Fehler werden gemeldet, aber das Spiel läuft weiter (sonst friert die VR-Ansicht ein)
 const errorEl = document.createElement('div');
@@ -2062,17 +2214,26 @@ renderer.setAnimationLoop(() => {
     try { renderer.setRenderTarget(null); scene.updateMatrixWorld(); renderer.render(scene, camera); } catch { /* nächstes Bild */ }
   }
 });
+// Messung der Rechenzeit (für Tests und die Leistungsanzeige): js = Spiel-Logik, parts = einzelne Bereiche
+const prof = { js: 0, n: 0, max: 0, parts: {}, lastDt: 0 };
+const timed = (name, fn) => { const t = performance.now(); fn(); prof.parts[name] = (prof.parts[name] || 0) + performance.now() - t; };
 function frameInner() {
   if (paused) { pauseFrame(renderer.xr.isPresenting); return; }
+  const _t0 = performance.now();
   const rawDt = clock.getDelta();
   const dt = Math.min(rawDt, 0.05);
+  prof.lastDt = rawDt;
   autoPerf(rawDt);
   elapsed += dt;
   const xr = renderer.xr.isPresenting;
-  if (!xr) { updateDesktopMove(dt); if (state === 'playing') updateDesktopHeight(dt); camera.rotation.set(lookPitch, lookYaw, 0, 'YXZ'); updateDesktopBow(dt); }
+  if (!xr) {
+    updateDesktopMove(dt); if (state === 'playing') updateDesktopHeight(dt);
+    camYaw += (lookYaw - camYaw) * Math.min(1, dt * 22); camPitch += (lookPitch - camPitch) * Math.min(1, dt * 22); // weich nachgeführt
+    camera.rotation.set(camPitch, camYaw, 0, 'YXZ'); updateDesktopBow(dt);
+  }
   camera.updateMatrixWorld(true);
   getViewCamera().getWorldPosition(headPos);
-  for (const h of hands) h.ray.updateMatrixWorld(true);
+  for (const h of hands) { h.ray.updateMatrixWorld(true); h.grip.updateMatrixWorld(true); }
   if (shadowsOn) { // Schattenkamera folgt dem Spieler
     sun.target.position.set(headPos.x, 0, headPos.z);
     shadowFloor.position.x = headPos.x; shadowFloor.position.z = headPos.z;
@@ -2093,10 +2254,9 @@ function frameInner() {
     updateHandsXR(dt);
   }
   if (state === 'setup') updateSetup(dt);
-  stepPhysics(dt);
-  updateWeapons(dt);
-  updateFlying(dt);
-  updateGame(dt);
+  timed('physik', () => stepPhysics(dt));
+  timed('waffen', () => { updateWeapons(dt); updateFlying(dt); });
+  timed('gegner', () => updateGame(dt));
   updateDust(dt);
   updateAtmosphere(dt);
   getViewCamera().getWorldDirection(tmpV);
@@ -2104,7 +2264,9 @@ function frameInner() {
   updateEffects(dt);
   updateDebris(dt);
   updateHud();
-  scene.updateMatrixWorld();
+  timed('matrizen', () => scene.updateMatrixWorld());
+  const js = performance.now() - _t0;
+  prof.js += js; prof.n++; prof.max = Math.max(prof.max, js);
   renderer.render(scene, camera);
 }
 
@@ -2112,6 +2274,7 @@ function frameInner() {
 applySettings();
 window.__cam = camera;
 window.__game = {
+  prof,
   renderer, room, hands, enemies, arsenal, uiPanels, get playerHp() { return playerHp; }, set playerHp(v) { playerHp = v; }, get kills() { return kills; }, placeOnRack, equipDesk, giveWeapon, openWeaponMenu, closeWeaponMenu, get weaponPanel() { return weaponPanel; }, deskAttack, spawnTrainer, player, combatOpts, take: (id, i) => { const w = newWeapon(id); takeWeapon(w, hands[i]); return w; }, get roundT() { return roundT; }, set roundT(v) { roundT = v; }, spawn: (type, at, passive) => spawnEnemy(headPos, { type, at, passive }), set trainType(v) { trainType = v; }, teleport: (x, z) => { camera.position.x = x; camera.position.z = z; }, settings, setup, menuPanel, setupPanel, pausePanel,
   get state() { return state; }, get paused() { return paused; }, get errors() { return errorCount; }, get floorOffset() { return floorOffset; },
   startPressed, enterMenu, enterSetup, finishSetup, setPaused, spawnEnemy: () => spawnEnemy(headPos), setTool, setupTriggerDown, setupTriggerUp,
