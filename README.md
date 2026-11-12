@@ -17,6 +17,23 @@ Starten: `index.html` über einen Webserver öffnen, z. B. über GitHub Pages od
 - 5 Speicherplätze für Räume
 - Ausrichten: eine geladene Karte an die echten Wände anlegen
 
+## Soldat wählen und Runden
+
+Nach **START** wählst du einen Soldaten. Seine Waffen und seine Rüstung sind alles, was du hast. Im Kampf gibt das Waffen-Menü keine Waffen heraus. Mehr bekommst du nur, wenn du aufhebst, was Gefallene fallen lassen (Schwert, Dolch, Streitkolben, Axt, Speer, Bogen, Schild).
+
+| Soldat | Waffen (Holster) | Rüstung | Besonderheit |
+|---|---|---|---|
+| 🛡 Ritter | Langschwert (Hüfte links), Dolch (Hüfte rechts), Wappenschild (Rücken) | Platte, Topfhelm, Kettenbeinlinge | Hiebe prallen ab, Ausdauer kommt langsamer zurück |
+| ⚔ Landsknecht | Zweihänder (Rücken), Kurzschwert (Hüfte) | Gambeson, Eisenhut | große Reichweite, Halbschwert und Mordschlag |
+| 🔱 Speerträger | Speer und Schild (Rücken), Kurzschwert (Hüfte) | Kettenhemd, Eisenhut | hält Gegner auf Abstand |
+| 🏹 Bogenschütze | Bogen (Rücken), Säbel und Dolch (Hüften) | Leder | Pfeile: hinter die linke Schulter greifen |
+| 🪓 Raufbold | Streitaxt und Streitkolben (Hüften), Armbrust (Rücken) | kaum | Ausdauer kommt am schnellsten zurück |
+
+- **Rüstung:** dämpft Treffer je nach Art (Hieb, Stich, Wucht) und Körperstelle. Selbst Platte fängt höchstens etwa zwei Drittel ab.
+- **Runden:** jede Runde eine feste Zahl Gegner (Runde 1: 4, dann mehr). Danach 12 s Pause und +25 Leben.
+- **Aufräumen:** Nach jeder dritten Runde verschwindet alles, was lose am Boden liegt: Waffen, in Wänden steckende Waffen, Pfeile, Trümmer. Fünf Sekunden vorher kommt eine Warnung. Was du hältst, im Holster trägst oder vor dir schweben hast, bleibt.
+- **Am PC:** Soldat mit den Tasten 1–5 wählen. Im Kampf rüsten die Zahlentasten nur Waffen aus, die du besitzt.
+
 ## So funktioniert der Kampf
 
 ### Angriffe der Gegner
@@ -125,6 +142,22 @@ Alles, was du in der Hand hältst, kannst du werfen: Lass es mitten im Schwung l
   - Keule wird zum Streitkolben, Hellebarde zum Speer.
 
 ### Holster, Köcher und Greifen
+
+- **Gürtel (Hüfte links und rechts):** je eine Einhandwaffe: Dolch, Kurzschwert, Langschwert, Säbel, Rapier, Streitkolben, Morgenstern, Axt, Buckler.
+- **Rücken (links und rechts):** alles. Speer, Zweihänder, Kriegshammer, Schild, Bogen und Armbrust passen **nur** auf den Rücken.
+- **Pfeile:** Greif hinter die Schulter, wo nichts auf dem Rücken hängt: Du bekommst immer einen neuen Pfeil. Ein losgelassener Pfeil fällt zu Boden.
+
+### Griffarten (B/Y mit der Waffe in der Hand, am PC G)
+
+| Waffe | Griffe |
+|---|---|
+| Speer | wie gegriffen · lang (am Ende, 1,9 m Reichweite) · kurz (am Eisen, für die Nähe) · überhand (Spitze nach unten, über Schilde stechen) |
+| Langschwert, Zweihänder | normal · **Halbschwert** (Hand an der Klinge: Stiche gehen durch Rüstungsfugen, Hiebe schwach) · **Mordschlag** (verkehrt gefasst, Knauf und Parierstange voran: wirkt wie ein Hammer, gut gegen Platte) |
+
+### Nahdistanz
+
+Ganz nah kommt man nicht auf Schwungtempo. Trotzdem verletzt eine Klinge, die du in den Körper **drückst** (Druckstoß) oder mit der Schneide am Körper **ziehst** (Ziehschnitt). Das geht etwa zweimal pro Sekunde.
+
 
 **Holster** (Einstellungen → 🎒 Körper):
 - Plätze: linke und rechte Hüfte, Rücken über beiden Schultern, Köcher.

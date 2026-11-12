@@ -1,13 +1,13 @@
 import * as THREE from 'three';
-import { surfacesOf, roomOccluders } from './room.js?v=12';
-import { buildNav, findPath, walkable, nearestWalkable, groundAt, STEP } from './nav.js?v=12';
-import { SFX, SFX3D } from './sfx.js?v=12';
-import { puff, addDebris, burst, sparks, floorDecal, floatingText } from './effects.js?v=12';
-import { segSeg, segPoint, segDisc, slerpDir } from './geom.js?v=12';
-import { makeArrowMesh, ARROW_LEN } from './arrow.js?v=12';
-import { HIP, SH_X, SH_Y, L1, L2, THIGH, SHIN, REACH, ENEMY_TYPES, TYPE_ORDER, ATK, EW, PARRY, SHIELD_POSE, SHIELD_R, SHIELD_HP, STANCES, bloodMat, buildFighter, makeWeapon, makeShield, makeBlob, warmFaces } from './fighter.js?v=12';
-import { startRagdoll, pokeRagdoll, freeze as freezeRagdoll, updateRagdolls, capturePose, initRagdolls, updateRagArrows, ragOpts, ragStats } from './ragdoll.js?v=12';
-import { aiOpts, PERSONAS, PERSONA_ORDER, pickPersona, makeAttrs, newKnow, observe, tickKnow, share, patterns, MORALE } from './ai.js?v=12';
+import { surfacesOf, roomOccluders } from './room.js?v=13';
+import { buildNav, findPath, walkable, nearestWalkable, groundAt, STEP } from './nav.js?v=13';
+import { SFX, SFX3D } from './sfx.js?v=13';
+import { puff, addDebris, burst, sparks, floorDecal, floatingText } from './effects.js?v=13';
+import { segSeg, segPoint, segDisc, slerpDir } from './geom.js?v=13';
+import { makeArrowMesh, ARROW_LEN } from './arrow.js?v=13';
+import { HIP, SH_X, SH_Y, L1, L2, THIGH, SHIN, REACH, ENEMY_TYPES, TYPE_ORDER, ATK, EW, PARRY, SHIELD_POSE, SHIELD_R, SHIELD_HP, STANCES, bloodMat, buildFighter, makeWeapon, makeShield, makeBlob, warmFaces } from './fighter.js?v=13';
+import { startRagdoll, pokeRagdoll, freeze as freezeRagdoll, updateRagdolls, capturePose, initRagdolls, updateRagArrows, ragOpts, ragStats } from './ragdoll.js?v=13';
+import { aiOpts, PERSONAS, PERSONA_ORDER, pickPersona, makeAttrs, newKnow, observe, tickKnow, share, patterns, MORALE } from './ai.js?v=13';
 export { ragOpts, ragStats, aiOpts, PERSONAS, PERSONA_ORDER, patterns };
 
 // =============================================================================
@@ -1389,7 +1389,8 @@ function updateShots(dt) {
     const len = a.distanceTo(b);
     raycaster.set(a, t5.subVectors(b, a).normalize()); raycaster.far = len;
     const wall = raycaster.intersectObjects(roomOccluders(), false)[0];
-    if (wall || b.y <= 0.01 || s.life <= 0) {
+    if (!wall && b.y > 0.01 && s.life <= 0) { scene.remove(s.obj); shots.splice(i, 1); continue; } // nichts getroffen: nicht in der Luft stehen lassen
+    if (wall || b.y <= 0.01) {
       const p = wall ? wall.point : b;
       s.obj.position.copy(p).addScaledVector(dir, -ARROW_LEN + 0.04);
       s.stuck = true; s.life = 6;
@@ -1770,15 +1771,10 @@ export function updateEnemies(dt) {
       } else if (walkTo(e, e.exitOut, dt, false, 1.35)) { if (!e.sentAway) player.defeated(e, 'fled'); removeEnemy(e); continue; }
       guardPose(e, dt, 1);
     }
-    // Abstand zu anderen Gegnern und zum Spieler
-    if (e.state === 'fight' && !e.passive) {
-      for (const o of enemies) {
-        if (o === e || o.state === 'dead' || (o.down && o.down.rag) || Math.abs(o.y - e.y) > 0.5) continue;
-        const ox = e.pos.x - o.pos.x, oz = e.pos.z - o.pos.z, od = Math.hypot(ox, oz);
-        if (od > 0.001 && od < 0.6) { const p = (0.6 - od) * 0.5 * Math.min(1, dt * 10); tryMove(e, ox / od * p, oz / od * p, true); }
-      }
+    // Abstand zum Spieler (zu anderen Gegnern: separate() nach der Schleife)
+    if ((e.state === 'fight' && !e.passive) || e.state === 'flee' || e.state === 'yield') {
       const px = e.pos.x - player.head.x, pz = e.pos.z - player.head.z, pd = Math.hypot(px, pz);
-      if (pd > 0.001 && pd < 0.55 && Math.abs(player.floor - e.y) < 0.5) tryMove(e, px / pd * (0.55 - pd), pz / pd * (0.55 - pd), true);
+      if (pd > 0.001 && pd < 0.55 && Math.abs(player.floor - e.y) < 0.5) shove(e, px / pd * (0.55 - pd), pz / pd * (0.55 - pd));
     }
     if (e.state === 'climbIn' || e.state === 'climbUp' || (e.state === 'exit' && e.opening.type === 'window')) {
       const k = e.state === 'climbUp' ? Math.min(1, e.climb ? e.climb.t / e.climb.T : 1) : Math.min(1, e.t / 1.6);
@@ -1791,6 +1787,39 @@ export function updateEnemies(dt) {
     // eigene Geschwindigkeit (geht in den Sturz ein)
     if (dt > 0) e.vel.lerp(t1.subVectors(e.pos, e.prevPos).divideScalar(dt), 0.3);
     e.prevPos.copy(e.pos);
+  }
+  separate(dt);
+}
+// Körper dürfen sich nicht durchdringen: jedes Paar, das sich zu nahe kommt, wird auseinandergeschoben –
+// beide je zur Hälfte; steht einer an der Wand, weicht der andere ganz bzw. seitlich aus.
+const BODY_R = 0.29, SEP = BODY_R * 2;
+const canBeShoved = (e) => (e.state === 'fight' && !(e.down && e.down.rag) && !e.getup) || e.state === 'flee' || e.state === 'yield' || e.state === 'enter';
+function shove(e, dx, dz) {
+  if (tryMove(e, dx, dz, true)) return true;
+  // an der Wand/am Möbel: entlang gleiten
+  return tryMove(e, dx, 0, true) || tryMove(e, 0, dz, true);
+}
+function separate(dt) {
+  for (let i = 0; i < enemies.length; i++) {
+    const a = enemies[i];
+    if (!canBeShoved(a)) continue;
+    for (let j = i + 1; j < enemies.length; j++) {
+      const b = enemies[j];
+      if (!canBeShoved(b) || Math.abs(a.y - b.y) > 0.5) continue;
+      let dx = a.pos.x - b.pos.x, dz = a.pos.z - b.pos.z, d = Math.hypot(dx, dz);
+      const min = SEP * Math.min(a.scale, b.scale);
+      if (d >= min) continue;
+      if (d < 1e-4) { const r = Math.random() * Math.PI * 2; dx = Math.cos(r); dz = Math.sin(r); d = 1; } else { dx /= d; dz /= d; }
+      // überlappende Körper sofort trennen, sonst weich auseinanderdrücken
+      const over = min - Math.min(d, min);
+      const k = d < min * 0.8 ? over : over * Math.min(1, dt * 12);
+      const wa = a.passive || a.state === 'yield' ? 0.25 : 0.5, wb = 1 - wa;
+      const movedA = shove(a, dx * k * wa, dz * k * wa), movedB = shove(b, -dx * k * wb, -dz * k * wb);
+      if (!movedA && movedB) shove(b, -dx * k * wa, -dz * k * wa);
+      else if (movedA && !movedB) shove(a, dx * k * wb, dz * k * wb);
+      else if (!movedA && !movedB) { shove(a, -dz * k * 0.5, dx * k * 0.5); shove(b, dz * k * 0.5, -dx * k * 0.5); } // beide eingeklemmt: seitlich aneinander vorbei
+      place(a); place(b);
+    }
   }
 }
 // Sterben: Knie geben nach, Körper kippt um und bleibt liegen, verschwindet nach einer Weile

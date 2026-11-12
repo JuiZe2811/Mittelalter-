@@ -1,18 +1,19 @@
 import * as THREE from 'three';
-import { VERSION } from './version.js?v=12';
+import { VERSION } from './version.js?v=13';
 import { ARButton } from 'three/addons/webxr/ARButton.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { makePanel, panelBg, roundRect } from './util.js?v=12';
-import { SFX, SFX_PLAYER, ensureAudio, setListener, setVolumes, setAudioPaused } from './sfx.js?v=12';
-import { segPoint, segSeg } from './geom.js?v=12';
-import { stepPhysics, addDynamic, removeDynamic, localBoxOf } from './physics.js?v=12';
-import { initEnemies, spawnEnemy, updateEnemies, clearEnemies, prepareNav, aliveCount, enemies, strikeTest, applyHit, shoveEnemy, hitShield, teamOpening, notifyShot, beatWeapon, pushEnemy, bindTest, bindPush, enemyWeaponSeg, player, opts as combatOpts, pickType, ENEMY_TYPES, TYPE_ORDER, warmupGroup, enemyParried, corpseTest, pushCorpse, grabFeedback, endGrab, ragOpts, ragStats, aiOpts, PERSONAS, PERSONA_ORDER, debugApi, describe, yieldAction } from './enemies.js?v=12';
-import { groundAt } from './nav.js?v=12';
-import { WEAPON_ORDER, WEAPONS, createWeapon, setBowString, setXbowString, xbowPull, initWeapons, shootArrow, throwWeapon, updateFlying, clearFlying, updateChain, makeArrowMesh } from './weapons.js?v=12';
-import { createHolsters, updateHolsters, slotNear, fits, holsterPose } from './holster.js?v=12';
-import { setWarn, surfaceDistance } from './room.js?v=12';
-import { room, addWall, addBox, makeWall, makeBox, rotateBox, removeSurface, clearRoom, setEditMode, suggestYaw, surfacesOf, importDetectedPlanes, saveRoom, loadRoom, hasSavedRoom, surfaceName, serializeRoom, deserializeRoom, roomSlots, saveRoomSlot, loadRoomSlot, addOpening, makeOpening, roomOccluders, setAtmosphere, closeRoomGaps, closeRoom, openWallEnds } from './room.js?v=12';
-import { initEffects, headRef, floatingText, updateEffects, updateDebris, fx, clearDebris, sparks, warmText, burst } from './effects.js?v=12';
+import { makePanel, panelBg, roundRect } from './util.js?v=13';
+import { SFX, SFX_PLAYER, ensureAudio, setListener, setVolumes, setAudioPaused } from './sfx.js?v=13';
+import { segPoint, segSeg } from './geom.js?v=13';
+import { stepPhysics, addDynamic, removeDynamic, localBoxOf } from './physics.js?v=13';
+import { initEnemies, spawnEnemy, updateEnemies, clearEnemies, prepareNav, aliveCount, enemies, strikeTest, applyHit, shoveEnemy, hitShield, teamOpening, notifyShot, beatWeapon, pushEnemy, bindTest, bindPush, enemyWeaponSeg, player, opts as combatOpts, pickType, ENEMY_TYPES, TYPE_ORDER, warmupGroup, enemyParried, corpseTest, pushCorpse, grabFeedback, endGrab, ragOpts, ragStats, aiOpts, PERSONAS, PERSONA_ORDER, debugApi, describe, yieldAction } from './enemies.js?v=13';
+import { groundAt } from './nav.js?v=13';
+import { ARMOR } from './fighter.js?v=13';
+import { WEAPON_ORDER, WEAPONS, createWeapon, setBowString, setXbowString, xbowPull, initWeapons, shootArrow, throwWeapon, updateFlying, clearFlying, updateChain, makeArrowMesh } from './weapons.js?v=13';
+import { createHolsters, updateHolsters, slotNear, fits, holsterPose } from './holster.js?v=13';
+import { setWarn, surfaceDistance } from './room.js?v=13';
+import { room, addWall, addBox, makeWall, makeBox, rotateBox, removeSurface, clearRoom, setEditMode, suggestYaw, surfacesOf, importDetectedPlanes, saveRoom, loadRoom, hasSavedRoom, surfaceName, serializeRoom, deserializeRoom, roomSlots, saveRoomSlot, loadRoomSlot, addOpening, makeOpening, roomOccluders, setAtmosphere, closeRoomGaps, closeRoom, openWallEnds } from './room.js?v=13';
+import { initEffects, headRef, floatingText, updateEffects, updateDebris, fx, clearDebris, sparks, warmText, burst } from './effects.js?v=13';
 const clamp = THREE.MathUtils.clamp;
 const hyp = (a, b, c = 0) => Math.sqrt(a * a + b * b + c * c); // schneller als Math.hypot und ohne Speicher-Müll
 
@@ -214,7 +215,7 @@ function updateHandsXR(dt) {
     if (!h.src) { h.pointer.visible = false; continue; }
     h.tipMarker.visible = state === 'setup' && setup.tool === 'floor';
     const free = !h.held && !h.drawing && !h.pull && !h.grip2 && !h.arrow;
-    const wasHolding = !!h.held;
+    const wasHolding = !!h.held, hadArrow = !!h.arrow;
     // Zeigestrahl (im Einrichtungsmodus als Laser bis zum Boden / zur Wand)
     let pt = null;
     if ((free || weaponPanel.visible || debugPanel.visible) && !(setup.drag && setup.drag.src === h)) pt = pointerTarget(h);
@@ -241,6 +242,8 @@ function updateHandsXR(dt) {
       if (near) { near.root.scale.setScalar(1.08); pulse(h, 0.2, 15); }
       h.highlight = near;
     }
+    // B/Y mit Speer oder (Lang-/Zwei-)Schwert in der Hand: Griff wechseln
+    if (down(h, 'b') && h.held && GRIPS[h.held.id] && state !== 'setup') cycleGrip(h.held, h);
     // A/X: Waffen-Menü öffnen/schließen
     if (down(h, 'a') && (state === 'playing' || state === 'menu')) toggleWeaponMenu();
     // Griff-Taste: Sehne greifen (andere Hand hält den Bogen), Waffe nehmen oder per Laser heranziehen
@@ -248,7 +251,8 @@ function updateHandsXR(dt) {
       const ow = otherHand(h).held;
       const nockDist = ow && ow.def.bow && !ow.loaded ? h.point.distanceTo(ow.model.localToWorld(ow.nock.clone())) : 9;
       const realQuiver = settings.quiver && settings.holsters && ow && ow.def.bow && !ow.def.crossbow;
-      const quiverSlot = settings.quiver && settings.holsters ? slotNear(holsters, h.point, 0.22, (S) => S.def.kind === 'quiver') : null;
+      // Pfeil: aus dem Köcher – oder hinter die Schulter greifen, wo nichts auf dem Rücken hängt (unbegrenzt)
+      const quiverSlot = settings.holsters ? (settings.quiver && slotNear(holsters, h.point, 0.22, (S) => S.def.kind === 'quiver')) || slotNear(holsters, h.point, 0.2, (S) => S.def.kind === 'back' && !S.weapon) : null;
       if (nockDist < 0.25 && !realQuiver) { h.drawing = ow; ow.draw = 0; SFX.click(500, 0.3, 0.05); pulse(h, 0.4, 30); }
       else if (quiverSlot && !h.arrow) { // Pfeil aus dem Köcher ziehen
         h.arrow = makeArrowMesh(0); scene.add(h.arrow); SFX.click(700, 0.25, 0.05); pulse(h, 0.5, 40);
@@ -271,6 +275,7 @@ function updateHandsXR(dt) {
       else if (settings.grip === 'hold' && !h.keepUntilSqueeze) releaseHand(h);
     }
     if (down(h, 'squeeze') && settings.grip === 'toggle' && wasHolding && h.held && !h.keepUntilSqueeze) releaseHand(h); // Tippen: nochmal drücken = loslassen
+    else if (down(h, 'squeeze') && settings.grip === 'toggle' && hadArrow && h.arrow) releaseHand(h);       // auch einen Pfeil
     if (down(h, 'squeeze')) h.keepUntilSqueeze = false;
 
     // Abzug: UI klicken bzw. Raum-Werkzeug
@@ -1201,13 +1206,13 @@ function holster(w, S) {
   w.root.visible = true; w.root.scale.setScalar(1);
   SFX.click(900, 0.35, 0.04); SFX.thud(0.2);
 }
-const MAX_WEAPONS = 16;
+const MAX_WEAPONS = 24;
 function newWeapon(id) {
   const w = createWeapon(id);
   scene.add(w.root);
   arsenal.push(w);
   // zu viele: die älteste nicht gehaltene Waffe verschwindet
-  if (arsenal.length > MAX_WEAPONS) { const old = arsenal.find(x => !x.holder && !x.desk && !x.thrown); if (old) removeWeapon(old); }
+  if (arsenal.length > MAX_WEAPONS) { const old = arsenal.find(x => !x.holder && !x.desk && !x.thrown && !x.holstered && !x.floating) || arsenal.find(x => !x.holder && !x.desk && !x.thrown && !x.holstered); if (old) removeWeapon(old); }
   return w;
 }
 function removeWeapon(w) {
@@ -1285,6 +1290,7 @@ function takeWeapon(w, h) {
     const ax = w.gb.clone().sub(w.ga).normalize(), L = w.root.worldToLocal(h.point.clone()), t = L.dot(ax);
     if (L.clone().addScaledVector(ax, -t).length() < 0.25) w.slide = clamp(t, -(w.ga.length() - 0.1), 0.45);
   }
+  w.slide0 = w.slide; w.gripIdx = 0; w.gripStyle = GRIPS[w.id] ? GRIPS[w.id][0].id : null; w.flip = false; w.pitch = 0;
   if (w.embed) { // aus dem Gegner ziehen: Wunde blutet
     const e = w.embed.e; w.embed = null;
     if (e.state !== 'dead') { e.bleed = Math.min(2.5, e.bleed + 0.8); burst(w.root.getWorldPosition(new THREE.Vector3()), 0x8a0a0a, 10); SFX.thunk(); }
@@ -1303,7 +1309,7 @@ function weaponNear(h) {
 }
 function releaseHand(h) {
   h.pull = null;
-  if (h.arrow) { const a = h.arrow; h.arrow = null; scene.attach(a); addDebris(a, h.vel.clone(), 3); }
+  if (h.arrow) { const a = h.arrow; h.arrow = null; dropArrow(a, h.vel.clone()); }
   if (h.grip2) { h.grip2.second = null; h.grip2.twoHand = false; h.grip2 = null; return; } // zweite Hand lässt den Schwertgriff los
   if (h.drawing) { bowRelease(h); return; }
   const w = h.held;
@@ -1320,6 +1326,22 @@ function releaseHand(h) {
   if (tv.length() > 2.6 && state !== 'setup') { launch(w, tv, h.angVel); return; } // im Schwung losgelassen = Wurf
   makeLooseW(w, h.vel.clone(), h.angVel.clone());
 }
+// Losgelassener Pfeil: fällt als echter Körper zu Boden (Physik), bleibt liegen und verschwindet nach einer Weile
+const looseArrows = [];
+function dropArrow(a, vel) {
+  if (a.parent !== scene) scene.attach(a);
+  a.updateMatrixWorld(true);
+  const L = { obj: a, t: 0, phys: null };
+  L.phys = addDynamic(a, localBoxOf(a), 0.05, { vel, angularDamping: 0.5, onLost: () => removeLooseArrow(L) });
+  looseArrows.push(L);
+  if (looseArrows.length > 24) removeLooseArrow(looseArrows[0]);
+}
+function removeLooseArrow(L) {
+  const i = looseArrows.indexOf(L); if (i >= 0) looseArrows.splice(i, 1);
+  if (L.phys) { removeDynamic(L.phys); L.phys = null; }
+  scene.remove(L.obj);
+}
+function updateLooseArrows(dt) { for (let i = looseArrows.length - 1; i >= 0; i--) { const L = looseArrows[i]; L.t += dt; if (L.t > 25) removeLooseArrow(L); } }
 // Wurf: jede Waffe fliegt und trifft (Spitze voran oder sich überschlagend); landet sie, gilt wieder Physik
 function launch(w, vel, angVel) {
   w.thrown = true;
@@ -1377,7 +1399,7 @@ function meleeUpdate(w, dt, h) {
   // Bewegung entlang der Klinge/des Schafts = Stich (nur Klingen und Speer)
   const easy = M.thrustEasy ? 0.7 : 1; // Rapier: schon kleine Stoßbewegungen zählen als Stich
   const thrust = (kind === 'blade' || kind === 'spear') && along > 0.9 * easy && baseAlong > 0.6 * easy && along > w.tipSpeed * 0.72 * easy;
-  if (!thrust && w.tipSpeed < M.minSpeed) { bindUpdate(w, s, dt, h); return; } // langsam: vielleicht Klinge an Klinge drücken
+  if (!thrust && w.tipSpeed < M.minSpeed) { if (!pressUpdate(w, s, axis, along, dt, h)) bindUpdate(w, s, dt, h); return; } // langsam: in den Körper drücken / Ziehschnitt, sonst vielleicht Klinge an Klinge
   // Bahn seit dem letzten Bild in kleinen Schritten prüfen (kontinuierliche Kollision: schnelle Hiebe gehen nicht hindurch)
   // Zwischenstellungen auf dem Bogen um die Hand (nicht geradlinig) – sonst „schneidet“ ein schneller Hieb die Kurve ab
   const piv0 = w.prevPiv || w.root.position, piv1 = w.root.position;
@@ -1420,9 +1442,11 @@ function meleeUpdate(w, dt, h) {
     if (kind === 'blade') power *= 0.35 + 0.65 * Math.min(1, u / 0.6); // Hebel: am Klingenansatz (Forte) schneidet es kaum, im vorderen Drittel voll
   }
   power *= tired;
+  if (w.gripStyle === 'halb') { if (thrust) { power *= 1.2; pen = Math.max(pen, 0.45); } else power *= 0.35; } // Halbschwert: präzise Stiche, kaum Hiebe
+  else if (w.gripStyle === 'mord') { type = 'blunt'; flat = false; power = M.slash * sp * 0.8 * (1 + 0.3 * two) * tired; pen = 0.4; } // Mordschlag: wie ein Hammer
   if (type === 'slash' && M.cut) power *= M.cut;                 // Säbel: besonders gute Schneide
   if (w.def.oneHandWeak && !w.twoHand) power *= 0.6;              // Zweihänder einhändig: Notführung
-  if (thrust && M.pen) pen = M.pen;
+  if (thrust && M.pen) pen = Math.max(pen, M.pen);
   const dir = (cSpeed > 0.1 ? _cv.clone() : w.tipVel.clone()).normalize();
   if (hit.kind !== 'body') { // Schild oder Waffe des Gegners im Weg: der Schwung ist abgefangen
     w.swingBlocked = true;
@@ -1437,6 +1461,32 @@ function meleeUpdate(w, dt, h) {
   if (h) pulse(h, r.killed ? 1 : r.armor ? 0.9 : 0.4 + 0.4 * sp / 1.7, r.killed ? 100 : 55);
   if (w.second) pulse(w.second, 0.6, 50);
   useStamina(power > 30 ? 4 : 2);
+}
+// Nahdistanz: Klinge langsam in den Körper gedrückt (Druckstoß) oder mit der Schneide am Körper gezogen (Ziehschnitt).
+// Ganz nah kommt man nicht auf Schwungtempo – trotzdem verletzt eine scharfe Klinge, die hineingedrückt oder gezogen wird.
+const _pa = new THREE.Vector3();
+function pressUpdate(w, s, axis, along, dt, h) {
+  const M = w.def.melee;
+  w.pressT = Math.max(0, (w.pressT || 0) - dt);
+  if (M.kind === 'blunt' || w.pressT > 0 || state === 'setup' || w.gripStyle === 'mord') return false;
+  const pushing = along > 0.3 && w.baseVel.dot(axis) > 0.15;  // Spitze voran, die Hand schiebt mit
+  const drawCut = M.kind === 'blade' && !pushing && Math.abs(along) > 0.45; // Schneide zieht am Körper entlang
+  if (!pushing && !drawCut) return false;
+  const hit = strikeTest(pushing ? _pa.copy(s.base).lerp(s.tip, M.kind === 'blade' ? 0.15 : 0.72) : s.base, s.tip, 0.012); // Klinge: alles jenseits der Parierstange; Speer: nur das Eisen
+  if (!hit || hit.kind !== 'body') return false;
+  const halb = w.gripStyle === 'halb';
+  const type = pushing ? 'thrust' : 'slash';
+  let power = pushing ? M.thrust * clamp(along / 1.8, 0.4, 0.7) * (halb ? 1.25 : 1) : M.slash * 0.3 * clamp(Math.abs(along) / 1.2, 0.5, 1) * (M.cut || 1);
+  power *= player.stam < 15 ? 0.75 : 1;
+  const pen = pushing ? Math.max(M.pen || 0, halb ? 0.45 : 0) : 0;
+  const dir = (pushing ? axis : w.tipVel).clone().normalize();
+  const r = applyHit(hit.e, hit.zone, { type, power, pen, dir, point: hit.point, knock: 0.4 });
+  onEnemyHit(hit, r, { type });
+  if (settings.popups && !r.killed && !r.notes.length && !r.armor) floatingText(pushing ? 'Druckstoß' : 'Ziehschnitt', hit.point.clone().add(new THREE.Vector3(0, 0.2, 0)), '#cfd8e3');
+  if (h) pulse(h, 0.7, 60);
+  w.pressT = 0.45;
+  useStamina(2);
+  return true;
 }
 // Bindung: Klinge liegt an der gegnerischen Waffe und wird langsam gedrückt → seine Deckung wird mitgeschoben
 function bindUpdate(w, s, dt, h) {
@@ -1680,8 +1730,9 @@ function playerHit(info) {
   SFX_PLAYER.hurt();
   if (info.type === 'blunt') SFX.thud(0.7);
   for (const h of hands) pulse(h, 1, info.zone === 'head' ? 220 : 150);
-  if (settings.popups && info.name) floatingText(`${info.name}${info.zone === 'head' ? ' – Kopf!' : info.zone === 'legs' ? ' – Bein' : ''}`, inFront(0.9, 0, headPos.y - 0.28), '#ff8a7a');
-  playerHp -= info.dmg;
+  const af = armorFactor(info.zone, info.type || 'slash');
+  if (settings.popups && info.name) floatingText(`${info.name}${info.zone === 'head' ? ' – Kopf!' : info.zone === 'legs' ? ' – Bein' : ''}${af < 0.6 ? ' · Rüstung hält' : ''}`, inFront(0.9, 0, headPos.y - 0.28), af < 0.6 ? '#cfd8e3' : '#ff8a7a');
+  playerHp -= info.dmg * af;
   if (playerHp > 0) return;
   if (state === 'menu') { // Übung/Duell im Menü: niemand stirbt
     playerHp = 100;
@@ -1797,7 +1848,7 @@ function updatePlayer(dt) {
   regenT -= dt;
   if (regenT <= 0 && playerHp < 100) playerHp = Math.min(100, playerHp + dt * 3);
   staminaT -= dt;
-  if (staminaT <= 0) player.stam = Math.min(100, player.stam + dt * 22);
+  if (staminaT <= 0) player.stam = Math.min(100, player.stam + dt * 22 * (soldier && state === 'playing' ? soldier.stamRegen : 1));
   if (state === 'playing' && playerHp < 35) { heartT -= dt; if (heartT <= 0) { heartT = 0.9; SFX_PLAYER.heartbeat(); } }
 }
 
@@ -1812,7 +1863,7 @@ function updateHud() {
   const show = state === 'playing' || settings.fps;
   if (prof.lastDt > 0) fpsEma += (1 / prof.lastDt - fpsEma) * 0.05;
   if (Math.abs(fpsEma - fpsShown) >= 1) fpsShown = Math.round(fpsEma);
-  const txt = `❤ ${Math.ceil(playerHp)}  ⚡ ${Math.round(player.stam)}  ⚔ ${kills}` + (settings.fps ? `  ${fpsShown} fps` : '');
+  const txt = `❤ ${Math.ceil(playerHp)}  ⚡ ${Math.round(player.stam)}  ⚔ ${kills}` + (state === 'playing' && wave.n ? `  R${wave.n} ${wave.phase === 'fight' ? '👥' + (wave.total - wave.spawned + aliveCount()) : '⏸' + Math.ceil(wave.t)}` : '') + (settings.fps ? `  ${fpsShown} fps` : '');
   if (!renderer.xr.isPresenting) {
     statusEl.style.display = show || enemies.length ? 'block' : 'none';
     statusEl.textContent = `${txt}\n${deskW ? deskW.def.icon + ' ' + deskW.def.name : 'keine Waffe'}${deskShield ? ' + 🛡 Schild' : ''}\n1–9, 0 Waffen · Klick Hieb/Schlag · E Stich · Leertaste Deckung · F werfen · Q Waffen-Menü`;
@@ -1835,6 +1886,40 @@ function updateHud() {
 // Nahkampfwaffen sitzen im Griff-Raum der Hand (Handfläche, Klinge verlängert die Faust) – mit einstellbarem
 // Griffwinkel. Bogen, Armbrust und Schild richten sich nach dem Zeigestrahl.
 const _hm = new THREE.Matrix4(), _hr = new THREE.Matrix4(), _hp = new THREE.Vector3(), _hq = new THREE.Quaternion(), _ax = new THREE.Vector3();
+// Griffarten (B/Y mit der Waffe in der Hand, am PC G): Speer an verschiedenen Stellen bzw. überhand,
+// Lang- und Zweihänder normal, im Halbschwert (Hand an der Klinge) oder verkehrt zum Mordschlag
+const GRIPS = {
+  spear: [
+    { id: 'gegriffen', name: 'Speer: wie gegriffen' },
+    { id: 'lang', name: 'Speer lang gefasst (am Ende) – mehr Reichweite', slide: -0.45 },
+    { id: 'kurz', name: 'Speer kurz gefasst (am Eisen) – für die Nähe', slide: 0.62 },
+    { id: 'ueber', name: 'Speer überhand – von oben über Schilde stechen', slide: 0.25, pitch: -0.8 }
+  ],
+  greatsword: [
+    { id: 'normal', name: 'Zweihänder: normal am Griff' },
+    { id: 'halb', name: 'Halbschwert – Hand an der Klinge, Stich durch Rüstungsfugen', slide: 0.5 },
+    { id: 'mord', name: 'Mordschlag – verkehrt gefasst, Knauf und Parierstange voran', slide: 0.95, flip: true }
+  ],
+  sword: [
+    { id: 'normal', name: 'Langschwert: normal am Griff' },
+    { id: 'halb', name: 'Halbschwert – Hand an der Klinge, Stich durch Rüstungsfugen', slide: 0.4 },
+    { id: 'mord', name: 'Mordschlag – verkehrt gefasst, Knauf und Parierstange voran', slide: 0.75, flip: true }
+  ]
+};
+function cycleGrip(w, h = null) {
+  const G = GRIPS[w.id];
+  if (!G) return false;
+  w.gripIdx = ((w.gripIdx || 0) + 1) % G.length;
+  const st = G[w.gripIdx];
+  w.gripStyle = st.id;
+  w.slide = st.slide !== undefined ? st.slide : (w.slide0 || 0);
+  w.flip = !!st.flip; w.pitch = st.pitch || 0;
+  w.smoothQ = null; w.prevTip = w.prevBase = null; // keine Schein-Bewegung durch das Umgreifen
+  SFX.grab();
+  if (h) pulse(h, 0.5, 50);
+  floatingText(st.name, inFront(0.8, 0, headPos.y - 0.25), '#ffd36a');
+  return true;
+}
 function holdTarget(w, h) {
   const ang = THREE.MathUtils.degToRad(settings.gripAngle || 0);
   // Der Raum (Handfläche oder Zeigestrahl) wird beim Greifen festgelegt – fällt er kurz aus, bleibt die Waffe stehen
@@ -1842,6 +1927,8 @@ function holdTarget(w, h) {
   if (useGrip ? !h.grip.visible : !h.ray.visible) { w.lost = true; return false; }
   if (w.def.melee && useGrip) _hm.copy(h.grip.matrixWorld).multiply(_hr.makeRotationX(-w.tilt0 + ang));
   else { _hm.multiplyMatrices(h.ray.matrixWorld, HOLD_OFFSET); if (w.def.melee && ang) _hm.multiply(_hr.makeRotationX(ang)); }
+  if (w.pitch) _hm.multiply(_hr.makeRotationX(w.pitch));          // Überhand: Spitze nach unten
+  if (w.flip) _hm.multiply(_hr.makeRotationX(Math.PI));             // Mordschlag: verkehrt herum gefasst
   if (w.slide) { _ax.copy(w.gb).sub(w.ga).normalize().multiplyScalar(-w.slide); _hm.multiply(_hr.makeTranslation(_ax.x, _ax.y, _ax.z)); }
   _hm.decompose(_hp, _hq, tmpS);
   return true;
@@ -2002,10 +2089,11 @@ function updateHolsterState(dt) {
       if (!h.src) continue;
       const d = S.anchor.position.distanceTo(h.point);
       if (S.def.kind === 'quiver') { if (settings.quiver && !h.held && !h.arrow && d < 0.3) hot = 1; continue; }
+      if (S.def.kind === 'back' && !S.weapon && !h.held && !h.arrow && d < 0.3) hot = 1; // leerer Rückenplatz: hier gibt es Pfeile
       if (h.held && fits(S, h.held) && d < 0.35) hot = 1;
       if (!h.held && S.weapon && d < 0.3) hot = 1;
       // spürbares Einrasten: kurze Vibration beim Erreichen der Zone
-      const inZone = d < 0.19 && ((h.held && fits(S, h.held)) || (!h.held && (S.weapon || (S.def.kind === 'quiver' && settings.quiver))));
+      const inZone = d < 0.19 && ((h.held && fits(S, h.held)) || (!h.held && (S.weapon || (S.def.kind === 'quiver' && settings.quiver) || S.def.kind === 'back')));
       if (inZone && h.zone !== S.id) { h.zone = S.id; pulse(h, 0.35, 25); }
       else if (!inZone && h.zone === S.id) h.zone = null;
     }
@@ -2058,7 +2146,7 @@ function enterMenu() {
   menuView = 'main';
   clearEnemies();
   clearFlying();
-  weaponPanel.visible = false;
+  weaponPanel.visible = false; soldierPanel.visible = false;
   menuPanel.visible = true;
   menuPanel.place(Math.min(1.1, freeDistance(headPos, inFront(1, 0.2, headPos.y).sub(headPos), 1.4) - 0.15), 0.2, -0.15);
   refreshMenu();
@@ -2069,7 +2157,7 @@ function refreshMenu() {
   const nDoor = surfacesOf('door').length, nWin = surfacesOf('window').length;
   menuPanel.set((ctx, w) => {
     const r = lastResult;
-    if (r) text(ctx, `${r.died ? '💀 Du bist gefallen' : 'Runde beendet'} · ${r.kills} Gegner besiegt · ${r.time}`, w / 2, 420, 24, '#ffcc33', 'center', true);
+    if (r) text(ctx, `${r.died ? '💀 Du bist gefallen' : 'Spiel beendet'} · ${r.soldier} · Runde ${r.wave} · ${r.kills} Gegner besiegt · ${r.time}`, w / 2, 420, 22, '#ffcc33', 'center', true);
     text(ctx, '🏰 Burg-Abwehr', w / 2, 48, 48, '#fff', 'center', true);
     text(ctx, 'Waffen holen: 🗡 Waffen-Menü (VR: A/X-Taste, PC: Q) – jederzeit, auch im Spiel', w / 2, 470, 20, '#cfd8e3');
     text(ctx, 'Schild/Klinge in den Schlag halten = Block · Klinge entgegenführen = Parade', w / 2, 500, 19, '#cfd8e3');
@@ -2116,43 +2204,152 @@ function refreshSettings() {
     text(ctx, `Version ${VERSION}`, w - 24, 664, 18, '#6b7a90', 'right');
   }, btns);
 }
+// START: zuerst einen Soldaten wählen – seine Waffen und Rüstung sind alles, was du hast
 function startPressed() {
   if (state !== 'menu') return;
-  state = 'playing';
-  menuPanel.visible = false;
+  state = 'choose';
+  menuPanel.visible = false; weaponPanel.visible = false;
   clearEnemies();
-  clearFlying();
-  clearDebris();
-  prepareNav(headPos);
-  spawnT = 3; spawned = 0;
-  playerHp = 100; kills = 0; roundT = 0; lastResult = null; hudKey = '';
   SFX.ui();
-  speak('Sie kommen');
-  if (!arsenal.some(w => w.holder || w.desk)) openWeaponMenu(); // noch keine Waffe in der Hand: gleich aussuchen
-  else floatingText('Waffen-Menü: A/X (PC: Q) · Pause: Stick oder B/Y (PC: Esc)', inFront(1.2, 0, headPos.y - 0.1), '#ffd36a');
+  openSoldierSelect();
 }
+function beginRound(id) {
+  if (state !== 'choose' || !SOLDIERS[id]) return;
+  soldier = SOLDIERS[id]; soldierId = id;
+  soldierPanel.visible = false;
+  state = 'playing';
+  clearEnemies(); clearFlying(); clearDebris(); clearLooseArrows();
+  for (const h of hands) releaseHand(h);
+  clearWeapons();                         // nur die eigene Ausrüstung zählt
+  prepareNav(headPos);
+  equipSoldier(soldier);
+  spawnT = 3; spawned = 0;
+  playerHp = 100; player.stam = 100; kills = 0; roundT = 0; lastResult = null; hudKey = '';
+  startWave(1);
+  floatingText(`${soldier.icon} ${soldier.name} · Waffen-Menü: A/X (PC: Q) · Pause: Stick (PC: Esc)`, inFront(1.2, 0, headPos.y - 0.25), '#ffd36a');
+}
+// Runden: jede Runde eine feste Zahl Gegner, danach kurze Atempause; alle CLEAN_EVERY Runden wird aufgeräumt
+const wave = { n: 0, total: 0, spawned: 0, phase: 'fight', t: 0, cleanAt: 0 };
+const CLEAN_EVERY = 3;
+const waveSize = (n) => Math.min(14, 2 + Math.round(n * 1.5));
+function startWave(n) {
+  wave.n = n; wave.total = waveSize(n); wave.spawned = 0; wave.phase = 'fight'; wave.t = 0; wave.cleanAt = 0;
+  spawnT = n === 1 ? 3 : 1.5;
+  speak(n === 1 ? 'Sie kommen' : `Runde ${n}`);
+  floatingText(`⚔ Runde ${n} – ${wave.total} Gegner`, inFront(1.2, 0, headPos.y + 0.1), '#ffcc33');
+}
+function updateWave(dt) {
+  roundT += dt;
+  combatOpts.tokens = wave.n < 2 ? 1 : 2;
+  if (wave.phase === 'fight') {
+    const maxAlive = Math.min(6, 2 + Math.floor(wave.n / 2));
+    spawnT -= dt;
+    if (wave.spawned < wave.total && spawnT <= 0 && aliveCount() < maxAlive) {
+      spawnEnemy(headPos, { type: pickType(30 * (wave.n - 1)) });
+      wave.spawned++; spawned++;
+      spawnT = THREE.MathUtils.randFloat(3, 6) * Math.max(0.5, 1 - wave.n / 14);
+    }
+    if (wave.spawned >= wave.total && aliveCount() === 0) { // Runde geschafft
+      wave.phase = 'break'; wave.t = 12;
+      playerHp = Math.min(100, playerHp + 25);
+      SFX.jingle([392, 494, 587, 784], 0.25);
+      floatingText(`✔ Runde ${wave.n} geschafft · +25 ❤ · nächste in 12 s`, inFront(1.2, 0, headPos.y + 0.1), '#7dffa8');
+      if (wave.n % CLEAN_EVERY === 0) { wave.cleanAt = 6; later(1.5, () => floatingText('🧹 In 5 s verschwinden alle losen Gegenstände am Boden – jetzt aufheben!', inFront(1.1, 0, headPos.y - 0.15), '#ffb04a')); }
+    }
+  } else {
+    wave.t -= dt;
+    if (wave.cleanAt > 0) { wave.cleanAt -= dt; if (wave.cleanAt <= 0) cleanupLoose(); }
+    if (wave.t <= 0) startWave(wave.n + 1);
+  }
+}
+// Aufräumen: alles, was lose herumliegt (Waffen am Boden, in Wänden, losgelassene Pfeile, Trümmer) verschwindet.
+// Was du hältst, im Holster trägst oder vor dir schweben hast, bleibt.
+function cleanupLoose() {
+  let n = 0;
+  for (const w of [...arsenal]) {
+    if (w.holder || w.desk || w.holstered || w.thrown || w.floating) continue;
+    if (w.embed && w.embed.e.state !== 'dead') continue; // steckt in einem lebenden Gegner
+    if (w.phys || w.stuckWall || w.embed) { removeWeapon(w); n++; }
+  }
+  n += looseArrows.length; clearLooseArrows();
+  clearDebris();
+  SFX.whoosh();
+  floatingText(`🧹 ${n} lose Gegenstände entfernt`, inFront(1.1, 0, headPos.y), '#cfd8e3');
+  return n;
+}
+function clearLooseArrows() { for (const L of [...looseArrows]) removeLooseArrow(L); }
 function updateGame(dt) {
   updatePlayer(dt);
   updateDefense(dt);
   if (weaponPanel.visible) return; // Waffen-Menü offen: alles steht still
   if (state === 'menu') { updateEnemies(dt); return; } // Übungsgegner und Duelle im Menü
   if (state !== 'playing') return;
-  roundT += dt;
-  // langsam schwerer: mehr und gefährlichere Gegner, später greifen zwei gleichzeitig an
-  combatOpts.tokens = roundT < 50 ? 1 : 2;
-  const maxAlive = Math.min(6, 2 + Math.floor(roundT / 40));
-  spawnT -= dt;
-  if (spawnT <= 0 && aliveCount() < maxAlive) {
-    spawnEnemy(headPos, { type: pickType(roundT) });
-    spawned++;
-    spawnT = THREE.MathUtils.randFloat(4, 7) * Math.max(0.5, 1 - roundT / 280);
-  }
+  updateWave(dt);
   updateEnemies(dt);
+}
+
+// =============================================================================
+// Soldaten: Auswahl zu Beginn. Jeder hat feste Waffen (im Holster) und eine Rüstung, die Treffer dämpft.
+// Im Kampf gibt es keine Waffen aus dem Menü – nur, was du trägst, und was Gefallene fallen lassen.
+// =============================================================================
+const SOLDIERS = {
+  ritter: { name: 'Ritter', icon: '🛡', main: 'sword', loadout: { hipL: 'sword', hipR: 'dagger', backL: 'shield' },
+    armor: { head: 'helmGreat', body: 'plate', legs: 'mail' }, stamRegen: 0.8, text: 'Langschwert, Dolch, Wappenschild · Plattenrüstung, Topfhelm · Hiebe prallen ab, ermüdet schneller' },
+  landsknecht: { name: 'Landsknecht', icon: '⚔', main: 'greatsword', loadout: { backR: 'greatsword', hipL: 'shortsword' },
+    armor: { head: 'helmIron', body: 'gambeson', legs: 'cloth' }, stamRegen: 1, text: 'Zweihänder, Kurzschwert · Gambeson, Eisenhut · große Reichweite, Halbschwert und Mordschlag' },
+  speer: { name: 'Speerträger', icon: '🔱', main: 'spear', loadout: { backR: 'spear', backL: 'shield', hipL: 'shortsword' },
+    armor: { head: 'helmIron', body: 'mail', legs: 'cloth' }, stamRegen: 1, text: 'Speer, Schild, Kurzschwert · Kettenhemd, Eisenhut · hält Gegner auf Abstand' },
+  schuetze: { name: 'Bogenschütze', icon: '🏹', main: 'bow', loadout: { backR: 'bow', hipL: 'sabre', hipR: 'dagger' },
+    armor: { head: 'cloth', body: 'leather', legs: 'cloth' }, stamRegen: 1.2, text: 'Bogen, Säbel, Dolch · Leder · Pfeile: hinter die linke Schulter greifen' },
+  raufbold: { name: 'Raufbold', icon: '🪓', main: 'axe', loadout: { hipL: 'axe', hipR: 'mace', backL: 'crossbow' },
+    armor: { head: 'none', body: 'leather', legs: 'cloth' }, stamRegen: 1.35, text: 'Streitaxt, Streitkolben, Armbrust · kaum Rüstung · schnell wieder bei Atem' }
+};
+const SOLDIER_ORDER = ['ritter', 'landsknecht', 'speer', 'schuetze', 'raufbold'];
+let soldier = null, soldierId = null;
+const soldierPanel = new UIPanel(1.1, 0.95, 720);
+soldierPanel.border = '#ffcc33';
+soldierPanel.visible = false;
+function openSoldierSelect() {
+  soldierPanel.visible = true;
+  soldierPanel.place(0.95, 0, -0.1);
+  soldierPanel.set((ctx, w) => {
+    text(ctx, '⚔ Wähle deinen Soldaten', w / 2, 44, 38, '#fff', 'center', true);
+    text(ctx, 'Seine Waffen und seine Rüstung sind alles, was du hast. Mehr gibt es nur von Gefallenen.', w / 2, 86, 18, '#cfd8e3');
+    SOLDIER_ORDER.forEach((id, i) => text(ctx, SOLDIERS[id].text, w / 2, 160 + i * 100, 16, '#9ad'));
+    text(ctx, `Alle ${CLEAN_EVERY} Runden verschwindet, was lose am Boden liegt.`, w / 2, 660, 17, '#ffb04a');
+  }, [
+    ...SOLDIER_ORDER.map((id, i) => ({ id: 's_' + id, label: `${SOLDIERS[id].icon} ${SOLDIERS[id].name}`, font: 28, x: 160, y: 104 + i * 100, w: 472, h: 44, onClick: () => beginRound(id) })),
+    { id: 's_back', label: '◀ Zurück', font: 22, x: 296, y: 600, w: 200, h: 40, onClick: () => { soldierPanel.visible = false; enterMenu(); } }
+  ]);
+}
+// Ausrüstung anlegen: VR mit Holstern → in die Holster; sonst Hauptwaffe in die Hand, Rest schwebt vor dir
+function equipSoldier(S) {
+  const xr = renderer.xr.isPresenting;
+  if (xr && settings.holsters) {
+    updateHolsterState(0);
+    for (const [slot, id] of Object.entries(S.loadout)) holster(newWeapon(id), holsters.slots[slot]);
+    return;
+  }
+  if (!xr) {
+    for (const [, id] of Object.entries(S.loadout)) {
+      const w = newWeapon(id);
+      if (id === S.main || (WEAPONS[id].shield && S.main !== 'bow')) equipDesk(w); else placeOnRackOne(w, true);
+    }
+    return;
+  }
+  for (const [, id] of Object.entries(S.loadout)) { if (id === S.main) giveWeapon(id); else placeOnRackOne(newWeapon(id), true); }
+}
+// Rüstung des Spielers dämpft Treffer je nach Art (Hieb, Stich, Wucht) und Körperstelle
+function armorFactor(zone, type) {
+  if (!soldier || state !== 'playing') return 1;
+  const A = ARMOR[soldier.armor[zone === 'head' ? 'head' : zone === 'legs' ? 'legs' : 'body']];
+  const raw = A ? (A[type] ?? 1) : 1;
+  return 0.35 + 0.65 * raw; // selbst Platte fängt höchstens ~2/3 ab: Wucht kommt durch
 }
 function endRound(died) {
   if (state !== 'playing') return;
   const m = Math.floor(roundT / 60), sec = Math.floor(roundT % 60);
-  lastResult = { died, kills, time: `${m}:${String(sec).padStart(2, '0')} min` };
+  lastResult = { died, kills, time: `${m}:${String(sec).padStart(2, '0')} min`, wave: wave.n, soldier: soldier ? soldier.name : '' };
   speak(died ? 'Du bist gefallen' : 'Runde beendet');
   if (died) SFX.jingle([392, 370, 349, 330, 196], 0.4);
   hurtFlash = died ? 1.5 : 0;
@@ -2188,17 +2385,18 @@ function refreshWeaponMenu() {
     text(ctx, xr ? 'Waffe anklicken → sie kommt in die Hand, mit der du klickst. Loslassen an Hüfte/Schulter = ins Holster.' : 'Waffe anklicken → du hast sie in der Hand (Schild links).', w / 2, 76, 17, '#cfd8e3');
     text(ctx, xr ? 'Griff-Taste loslassen = fallen lassen · im Schwung loslassen = werfen · Menü: A/X' : 'Menü auf/zu: Q · Waffen auch mit 1–9, 0 · F = werfen', w / 2, 100, 17, '#9ad');
     text(ctx, 'Übungsgegner – „Passiv“ steht still, „Duell“ kämpft gegen dich:', w / 2, 428, 18, '#9ad');
+    if (state === 'playing' && !weaponMsg) text(ctx, `Im Kampf gibt es nur deine Ausrüstung (${soldier ? soldier.icon + ' ' + soldier.name : ''}) und Waffen von Gefallenen.`, w / 2, 610, 17, '#ffb04a', 'center', true);
     if (weaponMsg) text(ctx, weaponMsg, w / 2, 610, weaponMsg.length > 70 ? 14 : 17, '#7dffa8', 'center', true);
     text(ctx, `${arsenal.length} Waffen · ${enemies.length} Gegner im Raum`, w - 24, 718, 15, '#6b7a90', 'right');
   }, [
-    ...[0, 1, 2, 3].flatMap(r => row(118 + r * 74, 64, WEAPON_ORDER.slice(r * 4, r * 4 + 4).map(id => ({ id: 'w_' + id, label: `${WEAPONS[id].icon} ${WEAPONS[id].name}`, font: 19, onClick: () => pickWeapon(id) })), W, 24, 10)),
+    ...[0, 1, 2, 3].flatMap(r => row(118 + r * 74, 64, WEAPON_ORDER.slice(r * 4, r * 4 + 4).map(id => ({ id: 'w_' + id, label: `${WEAPONS[id].icon} ${WEAPONS[id].name}`, font: 19, disabled: state === 'playing', onClick: () => pickWeapon(id) })), W, 24, 10)),
     ...row(442, 52, [
       { id: 'ttype', label: `◀ ${T.name} ▶`, font: 23, onClick: () => { trainType = TYPE_ORDER[(TYPE_ORDER.indexOf(trainType) + 1) % TYPE_ORDER.length]; weaponMsg = ''; refreshWeaponMenu(); } },
-      { id: 'dummy', label: '🎯 Passiv', font: 23, onClick: () => { spawnTrainer(true); weaponMsg = `${T.name} steht vor dir – wehrt sich nicht`; refreshWeaponMenu(); } },
-      { id: 'duel', label: '⚔ Duell', font: 23, onClick: () => { spawnTrainer(false); weaponMsg = `${T.name} fordert dich – Menü schließen, dann geht es los`; refreshWeaponMenu(); } }
+      { id: 'dummy', label: '🎯 Passiv', font: 23, disabled: state === 'playing', onClick: () => { spawnTrainer(true); weaponMsg = `${T.name} steht vor dir – wehrt sich nicht`; refreshWeaponMenu(); } },
+      { id: 'duel', label: '⚔ Duell', font: 23, disabled: state === 'playing', onClick: () => { spawnTrainer(false); weaponMsg = `${T.name} fordert dich – Menü schließen, dann geht es los`; refreshWeaponMenu(); } }
     ], W, 30, 12),
     ...row(504, 48, [
-      { id: 'loadout', label: '🎒 Ausrüstung anlegen', font: 20, disabled: !xr || !settings.holsters, onClick: () => { equipLoadout(); weaponMsg = 'Schwert linke Hüfte, Dolch rechte Hüfte, Schild und Bogen auf dem Rücken, Köcher'; refreshWeaponMenu(); } },
+      { id: 'loadout', label: '🎒 Ausrüstung anlegen', font: 20, disabled: !xr || !settings.holsters || state === 'playing', onClick: () => { equipLoadout(); weaponMsg = 'Schwert linke Hüfte, Dolch rechte Hüfte, Schild und Bogen auf dem Rücken, Köcher'; refreshWeaponMenu(); } },
       { id: 'fetch', label: '🧲 Waffen herholen', font: 20, disabled: !arsenal.length, onClick: () => { placeOnRack(false); weaponMsg = 'Waffen schweben vor dir'; refreshWeaponMenu(); } }
     ], W, 30, 12),
     ...row(560, 40, [
@@ -2216,6 +2414,7 @@ function equipLoadout() {
   put('sword', L ? 'hipR' : 'hipL'); put('dagger', L ? 'hipL' : 'hipR'); put('shield', 'backL'); put('bow', 'backR');
 }
 function pickWeapon(id) {
+  if (state === 'playing') { weaponMsg = 'Im Kampf nur deine Ausrüstung und Beute von Gefallenen'; refreshWeaponMenu(); return; }
   const h = uiClickHand;
   giveWeapon(id, h);
   SFX.grab();
@@ -2408,9 +2607,12 @@ function deskStrike(w) { // Treffer-Moment des PC-Schwungs
   if (!hit) return;
   const thrust = kind === 'spear' || (kind === 'blade' && w.deskThrust);
   const type = thrust ? 'thrust' : kind === 'blunt' ? 'blunt' : 'slash';
-  const power = (thrust ? M.thrust : kind === 'blunt' ? M.blunt * (w.def.needTwo ? 1.25 : 1) : M.slash) * 1.1 * (player.stam < 15 ? 0.75 : 1); // am PC gilt der Hammer als beidhändig geführt
+  let power = (thrust ? M.thrust : kind === 'blunt' ? M.blunt * (w.def.needTwo ? 1.25 : 1) : M.slash) * 1.1 * (player.stam < 15 ? 0.75 : 1); // am PC gilt der Hammer als beidhändig geführt
+  let typ = type, pen = M.pen || 0;
+  if (w.gripStyle === 'halb') { if (thrust) { power *= 1.2; pen = Math.max(pen, 0.45); } else power *= 0.35; }
+  else if (w.gripStyle === 'mord') { typ = 'blunt'; power = M.slash * 0.9; pen = 0.4; }
   if (hit.kind !== 'body') { enemyBlocked(hit, null, M.shield || 3, power, R.d.clone(), w); return; }
-  const r = applyHit(hit.e, hit.zone, { type, power, pen: M.pen || 0, knockdown: !!M.knock, dir: R.d.clone(), point: hit.point, knock: w.def.mass > 1.3 ? 1.2 : 0.5 });
+  const r = applyHit(hit.e, hit.zone, { type: typ, power, pen, knockdown: !!M.knock, dir: R.d.clone(), point: hit.point, knock: w.def.mass > 1.3 ? 1.2 : 0.5 });
   onEnemyHit(hit, r, { type });
 }
 // PC: Haltung der Waffen an der Kamera – Grundstellung, Schwung/Stich, Deckung (Leertaste)
@@ -2429,6 +2631,10 @@ function deskWeaponUpdate(w, dt) {
       else { w.root.position.set(0.25, -0.28, -0.45); w.root.rotation.set(-1.4 * s, 0, 0.5 * s); }
     } else if (deskGuard && !deskShield) { w.root.position.lerp(tmpV.set(0.32, 0.2, -0.3), Math.min(1, dt * 18)); w.root.rotation.set(0, Math.PI / 2, 0); } // „Dach“: Klinge quer über dem Kopf
     else { w.root.position.lerp(tmpV.set(0.25, -0.28, -0.45), Math.min(1, dt * 12)); w.root.rotation.set(0, 0, 0); }
+    // Griffart sichtbar machen
+    if (w.pitch) w.root.rotateX(w.pitch);
+    if (w.flip) w.root.rotateX(Math.PI);
+    if (w.slide) w.root.translateOnAxis(_ax.copy(w.gb).sub(w.ga).normalize(), -w.slide);
   } else return;
   w.root.updateWorldMatrix(true, true);
   if (w.def.melee) bladeState(w, dt);
@@ -2508,13 +2714,19 @@ window.addEventListener('keydown', (e) => {
   if (paused) return; // in der Pause keine Spiel-Tasten
   keys.add(e.code);
   if (e.key === 'Enter') startPressed();
+  if (state === 'choose') { const k = parseInt(e.key, 10); if (k >= 1 && k <= SOLDIER_ORDER.length) beginRound(SOLDIER_ORDER[k - 1]); return; }
   if (state !== 'setup') {
     const n = parseInt(e.key, 10);
-    if (n >= 0 && n <= 9 && e.key.length === 1) equipDesk(WEAPON_ORDER[n === 0 ? 9 : n - 1]);
+    if (n >= 0 && n <= 9 && e.key.length === 1) {
+      const id = WEAPON_ORDER[n === 0 ? 9 : n - 1];
+      if (state !== 'playing') equipDesk(id);
+      else { const own = arsenal.find(x => x.id === id && !x.thrown && !x.holder && !x.holstered); if (own) equipDesk(own); else floatingText(`${WEAPONS[id].name}: nicht in deiner Ausrüstung`, inFront(1.2, 0, headPos.y - 0.2), '#ffb04a'); }
+    }
     if (e.key === 'f' || e.key === 'F') deskThrow();
     if (e.key === 'e' || e.key === 'E') deskAttack(true);
     if (e.code === 'Space' && !deskGuard) { deskGuard = true; deskGuardT = elapsed; e.preventDefault(); }
     if ((e.key === 'q' || e.key === 'Q') && (state === 'playing' || state === 'menu')) toggleWeaponMenu();
+    if ((e.key === 'g' || e.key === 'G') && deskW && GRIPS[deskW.id]) cycleGrip(deskW);
     if ((e.key === 't' || e.key === 'T') && settings.devMenu) { if (debugPanel.visible) closeDebugMenu(); else openDebugMenu(); }
   }
 });
@@ -2741,12 +2953,13 @@ function frameInner() {
     if (state === 'playing' && trackLostT > 0.6) { trackLostT = 0; setPaused(true); floatingText('Tracking verloren – Pause', inFront(1, 0, headPos.y), '#ff8a7a'); pauseFrame(true); return; }
     // Bedienfelder folgen, wenn man sich weit entfernt
     for (const p of [setupPanel, menuPanel]) if (p.visible && headPos.distanceTo(p.anchor) > 1.3) p === menuPanel ? enterMenu() : p.place(0.85, 0.65, -0.4);
+    if (soldierPanel.visible && headPos.distanceTo(soldierPanel.anchor) > 1.3) soldierPanel.place(0.95, 0, -0.1);
     updateHandsXR(dt);
   }
   if (state === 'setup') updateSetup(dt);
   timed('physik', () => stepPhysics(dt));
   if (xr && settings.holsters) updateHolsterState(dt);
-  timed('waffen', () => { updateWeapons(dt); updateFlying(dt); });
+  timed('waffen', () => { updateWeapons(dt); updateFlying(dt); updateLooseArrows(dt); });
   if (xr) updateSafety(dt);
   timed('gegner', () => updateGame(dt));
   updateDebug(dt);
@@ -2773,5 +2986,6 @@ window.__game = {
   startPressed, enterMenu, enterSetup, finishSetup, setPaused, spawnEnemy: () => spawnEnemy(headPos), setTool, setupTriggerDown, setupTriggerUp,
   alignToLine, loadSlot, saveSlot, serializeRoom, surfaceAt, updateSetup,
   ragOpts, ragStats, aiOpts, debugApi, describe, yieldAction, openDebugMenu, closeDebugMenu, get debugPanel() { return debugPanel; }, setSetting,
+  beginRound, cleanupLoose, cycleGrip, dropArrow, get looseArrows() { return looseArrows; }, get wave() { return wave; }, get soldier() { return soldier; }, get soldierPanel() { return soldierPanel; }, startWave, armorFactor, SOLDIERS,
   spawnP: (type, at, persona, passive = false) => spawnEnemy(headPos, { type, at, persona, passive }), grabConstraint, corpseTest, pushCorpse, applyHit
 };

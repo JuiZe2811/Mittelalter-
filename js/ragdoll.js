@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
-import { world } from './physics.js?v=12';
-import { L1, L2, THIGH, SHIN } from './fighter.js?v=12';
+import { world } from './physics.js?v=13';
+import { L1, L2, THIGH, SHIN } from './fighter.js?v=13';
 
 // =============================================================================
 // Hybrides Ragdoll: Im Kampf bewegt die prozedurale Animation den Körper. Bei Tod oder Sturz übernimmt

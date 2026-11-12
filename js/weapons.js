@@ -1,9 +1,9 @@
 import * as THREE from 'three';
-import { strikeTest, applyHit, boneOf } from './enemies.js?v=12';
-import { roomOccluders } from './room.js?v=12';
-import { SFX } from './sfx.js?v=12';
-import { sparks, puff } from './effects.js?v=12';
-import { makeArrowMesh, ARROW_LEN } from './arrow.js?v=12';
+import { strikeTest, applyHit, boneOf } from './enemies.js?v=13';
+import { roomOccluders } from './room.js?v=13';
+import { SFX } from './sfx.js?v=13';
+import { sparks, puff } from './effects.js?v=13';
+import { makeArrowMesh, ARROW_LEN } from './arrow.js?v=13';
 export { makeArrowMesh };
 
 // =============================================================================
@@ -17,34 +17,34 @@ export const WEAPON_ORDER = ['dagger', 'shortsword', 'sword', 'sabre', 'rapier',
 // melee.kind: blade (Hieb + Stich) · blunt (stumpf) · axe (Hieb mit Durchschlag) · spear (Stich)
 // pen = Durchschlag: Anteil der Rüstung, der ignoriert wird · shield = Schaden an gegnerischen Schilden
 export const WEAPONS = {
-  dagger: { name: 'Dolch', icon: '🗡', melee: { kind: 'blade', slash: 14, thrust: 30, minSpeed: 1.3, base: 0.03, len: 0.22, shield: 2 }, throwable: true, mass: 0.4, reach: 1.15,
+  dagger: { name: 'Dolch', icon: '🗡', slot: 'hip', melee: { kind: 'blade', slash: 14, thrust: 30, minSpeed: 1.3, base: 0.03, len: 0.22, shield: 2 }, throwable: true, mass: 0.4, reach: 1.15,
     thrown: { point: true, type: 'thrust', power: 38 }, tip: 'Dolch: schneller Stich – gut gegen Stoff, Gambeson und Kette; im Schwung loslassen = Wurf, bleibt stecken' },
-  sword: { name: 'Langschwert', icon: '⚔', melee: { kind: 'blade', slash: 40, thrust: 34, minSpeed: 1.6, base: 0.06, len: 0.88, shield: 4 }, twoHand: true, mass: 1.4, reach: 1.75,
+  sword: { name: 'Langschwert', icon: '⚔', slot: 'hip', melee: { kind: 'blade', slash: 40, thrust: 34, minSpeed: 1.6, base: 0.06, len: 0.88, shield: 4 }, twoHand: true, mass: 1.4, reach: 1.75,
     thrown: { type: 'slash', power: 24 }, tip: 'Langschwert: Hieb gegen Ungepanzerte, Stich gegen Gambeson/Kette – an Platte gleitet es ab' },
-  shortsword: { name: 'Kurzschwert', icon: '🗡', melee: { kind: 'blade', slash: 30, thrust: 30, minSpeed: 1.4, base: 0.05, len: 0.6, shield: 3 }, mass: 1.0, reach: 1.4, slot: 'hip',
+  shortsword: { name: 'Kurzschwert', icon: '🗡', slot: 'hip', melee: { kind: 'blade', slash: 30, thrust: 30, minSpeed: 1.4, base: 0.05, len: 0.6, shield: 3 }, mass: 1.0, reach: 1.4,
     thrown: { type: 'slash', power: 20 }, tip: 'Kurzschwert: wendig, ideal in jeder Hand eines – zwei Kurzschwerter oder mit Buckler' },
-  sabre: { name: 'Säbel', icon: '🌙', melee: { kind: 'blade', slash: 48, thrust: 18, minSpeed: 1.4, base: 0.06, len: 0.8, shield: 3, cut: 1.2 }, mass: 1.2, reach: 1.6, slot: 'hip',
+  sabre: { name: 'Säbel', icon: '🌙', slot: 'hip', melee: { kind: 'blade', slash: 48, thrust: 18, minSpeed: 1.4, base: 0.06, len: 0.8, shield: 3, cut: 1.2 }, mass: 1.2, reach: 1.6,
     thrown: { type: 'slash', power: 22 }, tip: 'Säbel: gebogene Klinge, schneidet besonders gut gegen Stoff und Leder – schwach im Stich und an Kette/Platte' },
-  rapier: { name: 'Rapier', icon: '🤺', melee: { kind: 'blade', slash: 12, thrust: 44, pen: 0.12, minSpeed: 1.2, base: 0.06, len: 1.0, shield: 1, thrustEasy: true }, mass: 1.0, reach: 1.9, slot: 'hip',
+  rapier: { name: 'Rapier', icon: '🤺', slot: 'hip', melee: { kind: 'blade', slash: 12, thrust: 44, pen: 0.12, minSpeed: 1.2, base: 0.06, len: 1.0, shield: 1, thrustEasy: true }, mass: 1.0, reach: 1.9,
     thrown: { type: 'slash', power: 12 }, tip: 'Rapier: blitzschnelle, präzise Stiche (auch in Lücken der Rüstung), kleine Paraden – Hiebe kaum wirksam' },
-  greatsword: { name: 'Zweihänder', icon: '⚔', melee: { kind: 'blade', slash: 60, thrust: 40, minSpeed: 1.5, base: 0.08, len: 1.2, shield: 12 }, twoHand: true, oneHandWeak: true, mass: 3.0, reach: 2.2, slot: 'back',
+  greatsword: { name: 'Zweihänder', icon: '⚔', slot: 'back', melee: { kind: 'blade', slash: 60, thrust: 40, minSpeed: 1.5, base: 0.08, len: 1.2, shield: 12 }, twoHand: true, oneHandWeak: true, mass: 3.0, reach: 2.2,
     thrown: { type: 'slash', power: 30 }, tip: 'Zweihänder: mit beiden Händen führen (hinten am langen Griff fassen) – riesige Reichweite, wuchtige Hiebe; einhändig träge und schwach' },
-  mace: { name: 'Streitkolben', icon: '🔨', melee: { kind: 'blunt', blunt: 34, minSpeed: 1.5, shield: 10 }, mass: 1.6, reach: 1.45,
+  mace: { name: 'Streitkolben', icon: '🔨', slot: 'hip', melee: { kind: 'blunt', blunt: 34, minSpeed: 1.5, shield: 10 }, mass: 1.6, reach: 1.45,
     thrown: { type: 'blunt', power: 30, shield: 8 }, tip: 'Streitkolben: stumpfe Wucht – wirkt durch Kette und Platte, betäubt am Helm' },
-  morningstar: { name: 'Morgenstern', icon: '⛓', melee: { kind: 'blunt', blunt: 8, minSpeed: 2.2, shield: 2 }, flail: { blunt: 46, pen: 0.2, chain: 0.4, ballR: 0.055, minSpeed: 3.2, shield: 14 }, mass: 1.8, reach: 1.5, slot: 'hip',
+  morningstar: { name: 'Morgenstern', icon: '⛓', slot: 'hip', melee: { kind: 'blunt', blunt: 8, minSpeed: 2.2, shield: 2 }, flail: { blunt: 46, pen: 0.2, chain: 0.4, ballR: 0.055, minSpeed: 3.2, shield: 14 }, mass: 1.8, reach: 1.5,
     thrown: { type: 'blunt', power: 30, shield: 10 }, tip: 'Morgenstern: Kugel an der Kette – Schwung holen! Schlägt über den Rand von Schilden hinweg' },
-  axe: { name: 'Streitaxt', icon: '🪓', melee: { kind: 'axe', slash: 48, pen: 0.3, minSpeed: 1.6, shield: 28 }, mass: 1.8, reach: 1.5,
+  axe: { name: 'Streitaxt', icon: '🪓', slot: 'hip', melee: { kind: 'axe', slash: 48, pen: 0.3, minSpeed: 1.6, shield: 28 }, mass: 1.8, reach: 1.5,
     thrown: { type: 'slash', power: 42, pen: 0.25, shield: 22, stick: 0.5 }, tip: 'Streitaxt: schwerer Hieb, schlägt teils durch Rüstung und zertrümmert Schilde' },
-  hammer: { name: 'Kriegshammer', icon: '⚒', melee: { kind: 'blunt', blunt: 52, pen: 0.25, minSpeed: 1.5, shield: 22, knock: true }, twoHand: true, needTwo: true, mass: 3, reach: 1.8,
+  hammer: { name: 'Kriegshammer', icon: '⚒', slot: 'back', melee: { kind: 'blunt', blunt: 52, pen: 0.25, minSpeed: 1.5, shield: 22, knock: true }, twoHand: true, needTwo: true, mass: 3, reach: 1.8,
     thrown: { type: 'blunt', power: 44, pen: 0.2, shield: 18, knock: true }, tip: 'Kriegshammer (beidhändig!): zertrümmert Platte, wirft Gegner zu Boden – einhändig schwach' },
-  spear: { name: 'Speer', icon: '🔱', melee: { kind: 'spear', thrust: 38, slash: 12, minSpeed: 1.6, shield: 3 }, twoHand: true, mass: 1.5, reach: 2.3,
+  spear: { name: 'Speer', icon: '🔱', slot: 'back', melee: { kind: 'spear', thrust: 38, slash: 12, minSpeed: 1.6, shield: 3 }, twoHand: true, mass: 1.5, reach: 2.3,
     thrown: { point: true, type: 'thrust', power: 58, pen: 0.15, shield: 6 }, tip: 'Speer (wirft sich wie ein Wurfspeer): große Reichweite, Stiche gegen Gambeson und Kette – hält Gegner auf Abstand' },
-  bow: { name: 'Bogen', icon: '🏹', bow: true, mass: 0.8, tip: 'Bogen: schnell, gut gegen leichte Rüstung – Schilde fangen Pfeile ab' },
-  crossbow: { name: 'Armbrust', icon: '🎯', bow: true, crossbow: true, mass: 2.6, tip: 'Armbrust: Sehne zurückziehen bis sie einrastet, Abzug schießt – Bolzen durchschlagen Rüstung' },
-  shield: { name: 'Schild', icon: '🛡', shield: { r: 0.3 }, mass: 2.5, thrown: { type: 'blunt', power: 16, shield: 6 }, tip: 'Schild: blocken, Pfeile abfangen, Schildstoß' },
-  buckler: { name: 'Buckler', icon: '🔘', shield: { r: 0.17, buckler: true }, mass: 0.8, slot: 'hip', thrown: { type: 'blunt', power: 12, shield: 4 },
+  bow: { name: 'Bogen', icon: '🏹', slot: 'back', bow: true, mass: 0.8, tip: 'Bogen: schnell, gut gegen leichte Rüstung – Schilde fangen Pfeile ab' },
+  crossbow: { name: 'Armbrust', icon: '🎯', slot: 'back', bow: true, crossbow: true, mass: 2.6, tip: 'Armbrust: Sehne zurückziehen bis sie einrastet, Abzug schießt – Bolzen durchschlagen Rüstung' },
+  shield: { name: 'Schild', icon: '🛡', slot: 'back', shield: { r: 0.3 }, mass: 2.5, thrown: { type: 'blunt', power: 16, shield: 6 }, tip: 'Schild: blocken, Pfeile abfangen, Schildstoß' },
+  buckler: { name: 'Buckler', icon: '🔘', slot: 'hip', shield: { r: 0.17, buckler: true }, mass: 0.8, thrown: { type: 'blunt', power: 12, shield: 4 },
     tip: 'Buckler: kleiner Faustschild – nur wer ihn dem Schlag entgegenstößt, lenkt ab (dann aber perfekt); kurzer Faustschild-Stoß' },
-  stone: { name: 'Stein', icon: '🪨', melee: { kind: 'blunt', blunt: 12, minSpeed: 1.8, shield: 3 }, mass: 0.9, reach: 1.0, thrown: { type: 'blunt', power: 15, shield: 5 },
+  stone: { name: 'Stein', icon: '🪨', slot: 'hip', melee: { kind: 'blunt', blunt: 12, minSpeed: 1.8, shield: 3 }, mass: 0.9, reach: 1.0, thrown: { type: 'blunt', power: 15, shield: 5 },
     tip: 'Stein: werfen! Am Kopf betäubt er, gegen Ungepanzerte tut er weh' }
 };
 // Holster-Größe: an die Hüfte passt Kleines und Mittleres, auf den Rücken alles
@@ -398,7 +398,8 @@ export function updateFlying(dt) {
     if (wall || floorHitY || f.life <= 0) {
       const p = wall ? wall.point : tipB.clone().setY(Math.max(0.005, tipB.y));
       if (wall || floorHitY) { sparks(p, wall && wall.face ? wall.face.normal : new THREE.Vector3(0, 1, 0), 4); puff(p, 0x9a8a70, 0.06, 0.5, 0.1, 0.4); SFX.thud(0.25); }
-      if (f.kind === 'arrow') { f.obj.position.add(p.clone().sub(tipA)); f.stuck = true; f.life = 8; }
+      if (f.kind === 'arrow' && !wall && !floorHitY) { scene.remove(f.obj); flying.splice(i, 1); } // nichts getroffen (zu lange geflogen): verschwindet statt in der Luft zu hängen
+      else if (f.kind === 'arrow') { f.obj.position.add(p.clone().sub(tipA)); f.stuck = true; f.life = 8; }
       else if (wall && f.vel.length() > 5) { // Dolch/Speer bleibt in Wand oder Tisch stecken
         flying.splice(i, 1); f.obj.position.add(p.clone().sub(tipA).addScaledVector(dir, 0.06)); SFX.thunk();
         f.onDone && f.onDone(f.w, null, { wall: true });
