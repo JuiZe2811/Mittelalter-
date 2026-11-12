@@ -1,7 +1,8 @@
 # Burg-Abwehr (Mittelalter)
 
 Ein Mittelalter-Kampfspiel für die Meta Quest 3 (WebXR mit Passthrough).
-Bewaffnete Angreifer kommen durch die Türen und Fenster deines echten Raums. Du kämpfst mit Dolch, Langschwert, Schild und Bogen.
+Bewaffnete Angreifer kommen durch die Türen und Fenster deines echten Raums. Du kämpfst mit neun Waffen, vom Dolch bis zur Armbrust.
+Welche Waffe wirkt, hängt von der Rüstung des Gegners ab. Die Gegner kämpfen taktisch und arbeiten zusammen.
 Treffer, Blocks und Paraden werden aus der echten Bewegung der Waffen berechnet.
 
 Starten: `index.html` über einen Webserver öffnen, z. B. über GitHub Pages oder lokal mit `python3 -m http.server`.
@@ -26,9 +27,13 @@ Jeder Angriff ist eine echte Waffenbahn: ausholen, zuschlagen, durchschwingen. A
 |---|---|
 | Oberhau | von oben auf den Kopf |
 | Hieb von rechts / von links | auf den Rumpf |
+| Zornhau | schräg von der Schulter herab |
+| Unterhau | von unten nach oben |
+| Zwerchhau | waagrecht zum Kopf |
 | Tiefer Hieb | auf die Beine |
 | Stich | Brust; mit dem Speer auch Kopf oder Bein |
 | Schildstoß | Schildträger und Ritter stoßen aus der Nähe mit dem Schild zu |
+| Tritt | gegen deinen Schild (er deckt dann kurz nicht) oder in den Bauch |
 | Pfeil | Bogenschützen schießen aus der Entfernung |
 
 Dazu kommen:
@@ -47,17 +52,32 @@ Das Ziel wird am Ende des Ausholens festgelegt. Wer rechtzeitig zurückweicht, z
 - **Schwere Waffen:** Die Streitaxt schlägt durch eine nur hingehaltene Klinge durch und trifft dann mit weniger Wucht. Dagegen hilft eine echte Parade, ein beidhändig geführtes Schwert oder der Schild.
 - **Pfeile** kannst du mit einer schnellen Klinge wegschlagen.
 
-### Deine Angriffe
+### Deine Waffen
 
+| Waffe | Art | Stark gegen | Schwach gegen |
+|---|---|---|---|
+| 🗡 Dolch | Stich, schwacher Hieb | Stoff, Gambeson, Kette (Stich) | Platte |
+| ⚔ Langschwert | Hieb und Stich | Ungepanzerte (Hieb), Gambeson und Kette (Stich) | Platte: Hiebe gleiten ab |
+| 🔨 Streitkolben | stumpf | Kette, Platte; betäubt am Helm | Gambeson dämpft etwas |
+| 🪓 Streitaxt | Hieb mit Durchschlag | fast alles; zertrümmert Schilde | Platte nur mäßig |
+| ⚒ Kriegshammer | stumpf, beidhändig | Platte; wirft Gegner zu Boden | einhändig geführt schwach |
+| 🔱 Speer | Stich, große Reichweite | Gambeson, Kette; hält Gegner auf Abstand | Platte, Schilde |
+| 🏹 Bogen | Pfeile | leichte Rüstung | Schilde fangen Pfeile ab, Platte |
+| 🎯 Armbrust | Bolzen mit Durchschlag | auch Kette und Platte | langsames Spannen |
+| 🛡 Schild | Block, Schildstoß | | |
+
+So wirken sie:
 - **Hieb:** Die Klinge muss wirklich geschwungen werden. Je schneller, desto mehr Schaden; langsames Hineinhalten zählt nicht.
-- **Schneide:** Ein Hieb mit der Schneide wirkt voll, mit der flachen Seite nur etwa halb.
-- **Stich:** Eine Bewegung entlang der Klinge zählt als Stich. Stiche gehen deutlich besser durch Rüstung.
-- **Schwert beidhändig:** Greifst du mit der zweiten Hand unten an den Griff, führen beide Hände die Klinge.
-  - Hiebe werden 30 % stärker, Stiche 20 %.
-  - Das Schwert hält auch schweren Schlägen stand.
+- **Schneide:** Ein Hieb mit der Schneide wirkt voll, mit der flachen Seite nur etwa halb. Das gilt für Schwert, Dolch und Axt.
+- **Stich:** Eine Bewegung entlang der Klinge oder des Speerschafts zählt als Stich. Stiche gehen deutlich besser durch Rüstung.
+- **Stumpf:** Kolben und Hammer wirken in jede Schlagrichtung. Sehr wuchtige Treffer werfen den Gegner zu Boden; dort ist er einen Moment wehrlos.
+- **Beidhändig:** Schwert, Hammer und Speer kannst du mit der zweiten Hand hinten am Griff fassen. Beide Hände führen dann die Waffe, und sie trifft härter.
+- **Schilde der Gegner** haben eine Haltbarkeit. Die Axt zertrümmert einen Rundschild in drei Hieben, das Schwert braucht ein Vielfaches.
 - **Schildstoß:** Stößt du den Schild schnell nach vorne gegen einen Gegner, taumelt er zurück.
 - **Dolch werfen:** Lässt du den Dolch mitten im Schwung los, fliegt er.
-- **Bogen:** In einer Hand halten, mit der anderen die Sehne greifen, ziehen, loslassen. Pfeile bleiben im Gegner oder in seinem Schild stecken.
+- **Bogen:** In einer Hand halten, mit der anderen die Sehne greifen, ziehen, loslassen.
+- **Armbrust:** Mit der anderen Hand die Sehne zurückziehen, bis sie einrastet. Der Abzug schießt.
+- Pfeile und Bolzen bleiben im Gegner oder in seinem Schild stecken.
 
 ### Verteidigung der Gegner
 
@@ -65,6 +85,23 @@ Das Ziel wird am Ende des Ausholens festgelegt. Wer rechtzeitig zurückweicht, z
 - **Parade:** Geübte Gegner parieren mit der Waffe und setzen danach oft zum Gegenangriff an.
 - **Ausweichen:** Leichte Gegner springen zurück.
 - Von hinten und von der Seite können sie nicht blocken.
+
+### Taktik der Gegner
+
+Die Gegner sprechen sich ab und reagieren auf das, was du tust:
+
+- **Umzingeln:** Einer bindet dich von vorne, die anderen gehen in die Flanke und in den Rücken. Wer hinter dir steht, greift bevorzugt an.
+- **In die Blöße schlagen:** Sie prüfen, was dein Schild oder deine Klinge gerade deckt, und schlagen daran vorbei: hoch, tief oder schräg.
+- **Den Moment nutzen:** Hast du gerade einen Schlag geblockt, daneben geschlagen oder dich am Schild eines Gegners festgehauen, schlagen die anderen sofort zu.
+- **Schild wegtreten:** Verschanzt du dich hinter dem Schild, tritt ein Gegner dagegen. Der Schild deckt dann kurz nicht.
+- **Gegen Bogen und Armbrust:**
+  - Schildträger und Ritter halten den Schild genau in deine Schusslinie und rücken dahinter vor. Die Schienbeine bleiben frei.
+  - Gegner ohne Schild laufen im Zickzack heran und springen beim Schuss zur Seite.
+  - Alle Nahkämpfer stürmen schneller auf dich zu.
+- **Bogenschützen** zielen auf das, was dein Schild nicht deckt, und wechseln nach jedem Schuss die Stellung.
+- **Rückzug:** Schwer Verletzte ziehen sich hinter ihre Verbündeten zurück und kommen später wieder.
+- **Drohen:** Wartende brüllen mit erhobener Waffe oder schlagen auf ihren Schild.
+- Geübte Kämpfer wechseln ihre Grundstellung und kontern, wenn dein Hieb ins Leere geht.
 
 ### Trefferzonen und Folgen
 
@@ -86,13 +123,17 @@ Rüstung senkt den Schaden je Zone. Die Tabelle zeigt, wie viel Schaden durchkom
 
 | Rüstung | Hieb | Stich | Stumpf |
 |---|---|---|---|
-| Stoff | 90 % | 95 % | 95 % |
-| Leder | 70 % | 85 % | 85 % |
-| Gambeson | 58 % | 80 % | 75 % |
-| Kettenhemd | 30 % | 65 % | 85 % |
-| Plattenrüstung | 12 % | 35 % | 70 % |
-| Eisenhelm | 25 % | 50 % | 65 % |
-| Topfhelm | 10 % | 25 % | 55 % |
+| Stoff | 90 % | 95 % | 90 % |
+| Leder | 65 % | 85 % | 80 % |
+| Gambeson | 50 % | 80 % | 70 % |
+| Kettenhemd | 20 % | 60 % | 90 % |
+| Plattenrüstung | 8 % | 30 % | 75 % |
+| Eisenhelm | 20 % | 45 % | 70 % |
+| Topfhelm | 8 % | 22 % | 60 % |
+
+Durchschlag hebt einen Teil der Rüstung auf: Streitaxt 30 %, Kriegshammer 25 %, Armbrustbolzen 45 %.
+
+Beispiel Ritter, Treffer auf die Brustplatte: Ein Schwerthieb kostet ihn etwa 4 Leben, ein Stich 11, die Axt 19, der Streitkolben 35 und der Kriegshammer 58.
 
 ## Gegner
 
@@ -101,12 +142,13 @@ Es gibt nur normale menschliche Gegner, keine Bosse und keine Riesen.
 | Gegner | Bewaffnung | Rüstung | Besonderheit |
 |---|---|---|---|
 | Räuber | Dolch oder Keule | Stoff | schnell, weicht aus, flieht leicht |
-| Söldner | Schwert | Gambeson, oft Helm | pariert, fintiert, Kombos |
+| Söldner | Schwert oder Streitkolben | Gambeson, oft Helm | pariert, fintiert, Kombos |
 | Schildträger | Schwert und Rundschild | Kettenhemd, Eisenhelm | blockt mit dem Schild, Schildstoß |
 | Speerträger | Speer | Gambeson, Eisenhut | große Reichweite, Stiche auf Kopf, Brust und Bein |
+| Hellebardier | Hellebarde (zweihändig) | Kettenhemd, Eisenhut | größte Reichweite, Stich und schwerer Hieb |
 | Axtkämpfer | Streitaxt (zweihändig) | Leder | langsam, sehr harte Schläge |
 | Bogenschütze | Bogen, im Nahkampf Dolch | Stoff | hält Abstand, schießt |
-| Ritter | Schwert und Wappenschild | Platte, Kettenbeine, Topfhelm | kaum mit Hieben zu verletzen |
+| Ritter | Schwert oder Streitkolben, Wappenschild | Platte, Kettenbeine, Topfhelm | kaum mit Hieben zu verletzen |
 
 - Sie kommen von draußen: Durch Türen laufen sie, durch Fenster klettern sie.
 - Im Raum laufen sie um Wände und Möbel herum. Auf Hindernisse bis 1,05 m Höhe (Bett, Tisch) klettern sie hinauf.
@@ -140,8 +182,8 @@ Im Reiter **⚔ Kampf**:
 | rechte Maus ziehen | umschauen |
 | WASD | gehen, auch auf den Tisch hinauf |
 | Q | Waffen-Menü |
-| 1 / 2 / 3 / 4 | Dolch / Schwert / Bogen / Schild |
-| Linksklick | Hieb dorthin, wo das Fadenkreuz zeigt; mit dem Bogen halten = spannen |
+| 1–9 | Dolch, Schwert, Streitkolben, Axt, Hammer, Speer, Bogen, Armbrust, Schild |
+| Linksklick | Hieb oder Schlag dorthin, wo das Fadenkreuz zeigt; Bogen: halten = spannen; Armbrust: erst spannen, dann schießen |
 | E | Stich |
 | Leertaste | Deckung: Schild vor den Körper bzw. Klinge quer über den Kopf |
 | F | Dolch werfen |
@@ -161,4 +203,4 @@ Im Reiter **⚔ Kampf**:
 | `js/room.js` | Raum-Modell; Speichern und Laden |
 | `js/physics.js` | Physik für fallen gelassene Waffen |
 | `js/effects.js`, `js/sfx.js`, `js/util.js` | Partikel, Texte, Geräusche, Hilfsfunktionen |
-| `tools/version.py` | Versionsnummer setzen: `python3 tools/version.py 8` |
+| `tools/version.py` | Versionsnummer setzen: `python3 tools/version.py 9` |

@@ -10,15 +10,15 @@ export const HIP = 0.92, SH_X = 0.2, SH_Y = 0.5, L1 = 0.3, L2 = 0.31, THIGH = 0.
 
 // ---- Rüstung: Faktor auf den Schaden je Art (Hieb, Stich, stumpf) ------------------------
 export const ARMOR = {
-  none: { slash: 1, thrust: 1, blunt: 1, name: '' },
-  cloth: { slash: 0.9, thrust: 0.95, blunt: 0.95, name: 'Stoff' },
-  leather: { slash: 0.7, thrust: 0.85, blunt: 0.85, name: 'Leder' },
-  gambeson: { slash: 0.58, thrust: 0.8, blunt: 0.75, name: 'Gambeson' },
-  mail: { slash: 0.3, thrust: 0.65, blunt: 0.85, name: 'Kettenhemd' },
-  plate: { slash: 0.12, thrust: 0.35, blunt: 0.7, name: 'Plattenrüstung' },
-  helmCap: { slash: 0.7, thrust: 0.85, blunt: 0.8, name: 'Lederkappe' },
-  helmIron: { slash: 0.25, thrust: 0.5, blunt: 0.65, name: 'Eisenhelm' },
-  helmGreat: { slash: 0.1, thrust: 0.25, blunt: 0.55, name: 'Topfhelm' }
+  none: { slash: 1, thrust: 1, blunt: 0.9, name: '' },
+  cloth: { slash: 0.9, thrust: 0.95, blunt: 0.9, name: 'Stoff' },
+  leather: { slash: 0.65, thrust: 0.85, blunt: 0.8, name: 'Leder' },
+  gambeson: { slash: 0.5, thrust: 0.8, blunt: 0.7, name: 'Gambeson' },   // gepolstert: schluckt Hiebe und Schläge, Stiche gehen durch
+  mail: { slash: 0.2, thrust: 0.6, blunt: 0.9, name: 'Kettenhemd' },        // Hiebe gleiten ab, Stiche und stumpfe Schläge wirken
+  plate: { slash: 0.08, thrust: 0.3, blunt: 0.75, name: 'Plattenrüstung' }, // nur stumpfe Wucht (oder Lücken) hilft
+  helmCap: { slash: 0.65, thrust: 0.85, blunt: 0.8, name: 'Lederkappe' },
+  helmIron: { slash: 0.2, thrust: 0.45, blunt: 0.7, name: 'Eisenhelm' },
+  helmGreat: { slash: 0.08, thrust: 0.22, blunt: 0.6, name: 'Topfhelm' }
 };
 const HELM_ARMOR = { none: 'none', hood: 'cloth', cap: 'helmCap', nasal: 'helmIron', kettle: 'helmIron', great: 'helmGreat' };
 
@@ -26,22 +26,24 @@ const HELM_ARMOR = { none: 'none', hood: 'cloth', cap: 'helmCap', nasal: 'helmIr
 // parry/guard/dodge: Wahrscheinlichkeit zu parieren / den Schild richtig zu führen / auszuweichen
 // feint: Anteil Finten · aggro: Angriffslust · flee: Fluchtneigung, wenn es schlecht steht
 export const ENEMY_TYPES = {
-  bandit: { name: 'Räuber', hp: 70, speed: 0.95, weapons: ['dagger', 'club'], armor: { torso: 'cloth', arms: 'none', legs: 'cloth' }, helmets: ['hood', 'none', 'hood'],
+  bandit: { name: 'Räuber', hp: 70, smart: 0.3, arrowDodge: 0.35, speed: 0.95, weapons: ['dagger', 'club'], armor: { torso: 'cloth', arms: 'none', legs: 'cloth' }, helmets: ['hood', 'none', 'hood'],
     parry: 0.1, guard: 0, dodge: 0.35, feint: 0, aggro: 1.25, flee: 0.6, react: 0.3, tunic: [0x5a4a36, 0x4a5236, 0x5a3a2e, 0x3e3a34] },
-  soldier: { name: 'Söldner', hp: 95, speed: 0.82, weapons: ['sword'], armor: { torso: 'gambeson', arms: 'gambeson', legs: 'cloth' }, helmets: ['cap', 'nasal', 'none'],
+  soldier: { name: 'Söldner', hp: 95, smart: 0.7, arrowDodge: 0.3, speed: 0.82, weapons: ['sword', 'sword', 'mace'], armor: { torso: 'gambeson', arms: 'gambeson', legs: 'cloth' }, helmets: ['cap', 'nasal', 'none'],
     parry: 0.45, guard: 0, dodge: 0.1, feint: 0.2, aggro: 1, flee: 0.15, react: 0.22, tunic: [0x7a2a22, 0x2a3f6a, 0x3f5a2a] },
-  shield: { name: 'Schildträger', hp: 100, speed: 0.75, weapons: ['sword'], shield: 'round', armor: { torso: 'mail', arms: 'gambeson', legs: 'cloth' }, helmets: ['nasal'],
+  shield: { name: 'Schildträger', hp: 100, smart: 0.75, arrowDodge: 0, speed: 0.75, weapons: ['sword'], shield: 'round', armor: { torso: 'mail', arms: 'gambeson', legs: 'cloth' }, helmets: ['nasal'],
     parry: 0.08, guard: 0.75, dodge: 0, feint: 0.1, aggro: 0.9, flee: 0.1, react: 0.2, tunic: [0x7a2a22, 0x2a3f6a, 0x6a5a1a] },
-  spear: { name: 'Speerträger', hp: 85, speed: 0.8, weapons: ['spear'], armor: { torso: 'gambeson', arms: 'gambeson', legs: 'cloth' }, helmets: ['kettle'],
+  spear: { name: 'Speerträger', hp: 85, smart: 0.6, arrowDodge: 0.25, speed: 0.8, weapons: ['spear'], armor: { torso: 'gambeson', arms: 'gambeson', legs: 'cloth' }, helmets: ['kettle'],
     parry: 0.25, guard: 0, dodge: 0.2, feint: 0.15, aggro: 0.95, flee: 0.2, react: 0.24, tunic: [0x3f5a2a, 0x2a3f6a] },
-  axe: { name: 'Axtkämpfer', hp: 120, speed: 0.76, weapons: ['axe'], armor: { torso: 'leather', arms: 'none', legs: 'cloth' }, helmets: ['none'], beard: true,
+  axe: { name: 'Axtkämpfer', hp: 120, smart: 0.3, arrowDodge: 0.1, speed: 0.76, weapons: ['axe'], armor: { torso: 'leather', arms: 'none', legs: 'cloth' }, helmets: ['none'], beard: true,
     parry: 0.08, guard: 0, dodge: 0.05, feint: 0, aggro: 1.1, flee: 0, react: 0.3, tunic: [0x4a3020] },
-  archer: { name: 'Bogenschütze', hp: 60, speed: 0.9, weapons: ['bow'], armor: { torso: 'cloth', arms: 'cloth', legs: 'cloth' }, helmets: ['hood'],
+  archer: { name: 'Bogenschütze', hp: 60, smart: 0.6, arrowDodge: 0.4, speed: 0.9, weapons: ['bow'], armor: { torso: 'cloth', arms: 'cloth', legs: 'cloth' }, helmets: ['hood'],
     parry: 0.05, guard: 0, dodge: 0.3, feint: 0, aggro: 1, flee: 0.5, react: 0.3, tunic: [0x35502a, 0x4a4a2a] },
-  knight: { name: 'Ritter', hp: 130, speed: 0.62, weapons: ['sword'], shield: 'heater', armor: { torso: 'plate', arms: 'plate', legs: 'mail' }, helmets: ['great'],
-    parry: 0.3, guard: 0.9, dodge: 0, feint: 0.25, aggro: 0.9, flee: 0, react: 0.17, tunic: [0x8a1a1a, 0x1a2a7a, 0xd8d0b8] }
+  knight: { name: 'Ritter', hp: 130, smart: 0.9, arrowDodge: 0, speed: 0.62, weapons: ['sword', 'mace'], shield: 'heater', armor: { torso: 'plate', arms: 'plate', legs: 'mail' }, helmets: ['great'],
+    parry: 0.3, guard: 0.9, dodge: 0, feint: 0.25, aggro: 0.9, flee: 0, react: 0.17, tunic: [0x8a1a1a, 0x1a2a7a, 0xd8d0b8] },
+  halberd: { name: 'Hellebardier', hp: 105, smart: 0.7, arrowDodge: 0.15, speed: 0.74, weapons: ['halberd'], armor: { torso: 'mail', arms: 'gambeson', legs: 'cloth' }, helmets: ['kettle'],
+    parry: 0.3, guard: 0, dodge: 0.1, feint: 0.1, aggro: 0.95, flee: 0.1, react: 0.24, tunic: [0x6a5a1a, 0x7a2a22] }
 };
-export const TYPE_ORDER = ['bandit', 'soldier', 'shield', 'spear', 'axe', 'archer', 'knight'];
+export const TYPE_ORDER = ['bandit', 'soldier', 'shield', 'spear', 'halberd', 'axe', 'archer', 'knight'];
 
 // ---- Angriffe im „Angriffsraum“: r = zur Waffenseite, u = hoch, f = nach vorne (zum Ziel) ----
 // wind = Ausholen (Hand + Klingenrichtung) · via = Klingenrichtung auf halbem Weg (für den Bogen)
@@ -55,6 +57,14 @@ export const ATK = {
     follow: { d: [0.55, -0.1, -0.1], bd: [0.88, -0.05, 0.47] }, lean: 0.12, twist: -0.5 },
   unten: { name: 'Tiefer Hieb', wind: { hp: [0.5, 1.15, -0.08], bd: [0.8, 0.3, -0.52] }, via: [0.75, -0.2, 0.63], imp: [-0.2, -0.38, 0.9], target: 'legs',
     follow: { d: [-0.45, -0.1, -0.1], bd: [-0.85, -0.3, 0.43] }, lean: 0.38, twist: 0.4 },
+  zornR: { name: 'Zornhau', wind: { hp: [0.36, 1.72, -0.05], bd: [0.45, 0.7, -0.55] }, via: [0.42, 0.62, 0.66], imp: [-0.3, -0.3, 0.905], target: 'side',
+    follow: { d: [-0.4, -0.42, -0.02], bd: [-0.7, -0.52, 0.49] }, lean: 0.26, twist: 0.45 },
+  zornL: { name: 'Zornhau von links', wind: { hp: [-0.26, 1.72, 0.05], bd: [-0.5, 0.7, -0.5] }, via: [-0.42, 0.62, 0.66], imp: [0.3, -0.3, 0.905], target: 'side',
+    follow: { d: [0.45, -0.42, -0.02], bd: [0.7, -0.52, 0.49] }, lean: 0.26, twist: -0.45 },
+  unterhau: { name: 'Unterhau', wind: { hp: [0.42, 0.78, -0.1], bd: [0.5, -0.72, -0.48] }, via: [0.62, -0.5, 0.6], imp: [-0.2, 0.36, 0.91], target: 'side',
+    follow: { d: [-0.3, 0.42, -0.02], bd: [-0.5, 0.72, 0.48] }, lean: 0.18, twist: 0.4 },
+  kopf: { name: 'Zwerchhau zum Kopf', wind: { hp: [0.46, 1.7, -0.05], bd: [0.8, 0.32, -0.5] }, via: [0.75, 0.12, 0.65], imp: [-0.25, 0, 0.968], target: 'face',
+    follow: { d: [-0.5, -0.05, -0.1], bd: [-0.9, 0, 0.44] }, lean: 0.1, twist: 0.5 },
   stich: { name: 'Stich', wind: { hp: [0.3, 1.22, -0.2], bd: [0, 0.04, 1] }, imp: [0, 0, 1], target: 'chest', thrust: true,
     follow: { d: [0, 0, 0.04], bd: [0, 0, 1] }, lean: 0.24, twist: 0.3 },
   stichHoch: { name: 'Stich zum Kopf', wind: { hp: [0.3, 1.5, -0.22], bd: [0, -0.02, 1] }, imp: [0, 0, 1], target: 'face', thrust: true,
@@ -69,7 +79,8 @@ export const ATK = {
 export const EW = {
   sword: { name: 'Schwert', len: 0.88, haft: [0.04, 0.88], edge: [0.24, 0.88], r: 0.02, range: 1.22, dmg: 16, type: 'slash', tw: 0.62, ts: 0.2, lunge: 0.22,
     guard: { hp: [0.24, 1.12, 0.3], bd: [-0.18, 0.82, 0.54] },
-    moves: { oberhau: 3, rechts: 3, links: 2, unten: 1.5, stich: 2 }, combos: [['rechts', 'links'], ['oberhau', 'stich'], ['links', 'oberhau'], ['stich', 'rechts']] },
+    moves: { oberhau: 3, rechts: 2.5, links: 2, unten: 1.5, stich: 2, zornR: 2.5, zornL: 1.5, unterhau: 1.5, kopf: 1.5 },
+    combos: [['rechts', 'links'], ['oberhau', 'stich'], ['links', 'oberhau'], ['stich', 'rechts'], ['zornR', 'unterhau'], ['kopf', 'unten'], ['zornL', 'zornR', 'stich']] },
   dagger: { name: 'Dolch', len: 0.28, haft: [0.03, 0.28], edge: [0.07, 0.28], r: 0.02, range: 0.8, dmg: 9, type: 'slash', tw: 0.36, ts: 0.14, lunge: 0.28,
     guard: { hp: [0.24, 1.15, 0.32], bd: [0, 0.45, 0.89] },
     moves: { stich: 4, rechts: 2, links: 2, stichHoch: 1 }, combos: [['stich', 'stich'], ['rechts', 'links', 'stich'], ['links', 'stich']] },
@@ -78,7 +89,13 @@ export const EW = {
     moves: { oberhau: 4, rechts: 3, links: 1.5 }, combos: [['rechts', 'oberhau'], ['oberhau', 'oberhau']] },
   axe: { name: 'Streitaxt', len: 1.0, haft: [-0.3, 1.0], edge: [0.78, 1.0], r: 0.09, range: 1.42, dmg: 26, type: 'slash', tw: 0.95, ts: 0.24, lunge: 0.3, heavy: true, twoH: 0.42,
     guard: { hp: [0.2, 1.02, 0.2], bd: [-0.4, 0.88, 0.25] },
-    moves: { oberhau: 4, rechts: 3, links: 2 }, combos: [['rechts', 'links']] },
+    moves: { oberhau: 4, rechts: 3, links: 2, zornR: 3, zornL: 2 }, combos: [['rechts', 'links'], ['zornR', 'zornL']] },
+  mace: { name: 'Streitkolben', len: 0.62, haft: [0.05, 0.62], edge: [0.44, 0.62], r: 0.055, range: 1.08, dmg: 17, type: 'blunt', tw: 0.6, ts: 0.2, lunge: 0.24,
+    guard: { hp: [0.26, 1.12, 0.28], bd: [-0.1, 0.9, 0.42] },
+    moves: { oberhau: 4, rechts: 3, links: 2, zornR: 3, kopf: 1.5 }, combos: [['rechts', 'oberhau'], ['zornR', 'links'], ['oberhau', 'oberhau']] },
+  halberd: { name: 'Hellebarde', len: 1.78, haft: [-0.5, 1.78], edge: [1.42, 1.78], r: 0.07, range: 2.08, dmg: 23, type: 'slash', tw: 0.86, ts: 0.24, lunge: 0.3, heavy: true, twoH: 0.6,
+    guard: { hp: [0.28, 1.05, -0.2], bd: [-0.05, 0.42, 0.9] },
+    moves: { stich: 3.5, oberhau: 3, stichTief: 1.5, rechts: 1.5, stichHoch: 1.5 }, combos: [['stich', 'oberhau'], ['stichTief', 'stichHoch']] },
   spear: { name: 'Speer', len: 1.56, haft: [-0.6, 1.56], edge: [1.3, 1.56], r: 0.025, range: 1.95, dmg: 17, type: 'thrust', tw: 0.6, ts: 0.2, lunge: 0.3, twoH: 0.55,
     guard: { hp: [0.28, 1.08, -0.15], bd: [-0.03, 0.1, 0.99] },
     moves: { stich: 4, stichHoch: 2, stichTief: 2 }, combos: [['stich', 'stichHoch'], ['stichTief', 'stich']] },
@@ -86,6 +103,13 @@ export const EW = {
   fist: { name: 'Faust', len: 0.08, haft: [0, 0.08], edge: [0, 0.08], r: 0.05, range: 0.72, dmg: 5, type: 'blunt', tw: 0.32, ts: 0.13, lunge: 0.25,
     guard: { hp: [0.2, 1.25, 0.3], bd: [0, 0.3, 0.95] }, moves: { stich: 3, stichHoch: 2 }, combos: [['stich', 'stichHoch']] }
 };
+// Grundstellungen („Huten“), zwischen denen geübte Kämpfer wechseln: Pflug, Ochs, Alber, vom Tag
+export const STANCES = [
+  { hp: [0.24, 1.12, 0.3], bd: [-0.18, 0.82, 0.54] },
+  { hp: [0.3, 1.62, 0.12], bd: [-0.25, -0.12, 0.96] },
+  { hp: [0.22, 0.95, 0.32], bd: [-0.1, -0.45, 0.89] },
+  { hp: [0.3, 1.5, 0.02], bd: [0.1, 0.92, -0.35] }
+];
 // Parade-Stellungen (Hand, Klingenrichtung) je Zone, aus der der Hieb des Spielers kommt
 export const PARRY = {
   high: { hp: [0.3, 1.64, 0.32], bd: [-0.97, 0.2, 0.08] },
@@ -261,6 +285,19 @@ export function weaponGeo(id) {
       part(new THREE.ConeGeometry(0.034, 0.27, 4).rotateY(Math.PI / 4), STEEL, 0, 1.43, 0, 0, 0, 0, 1, 1, 0.3),
       part(new THREE.CylinderGeometry(0.02, 0.02, 0.06, 8), DARK_STEEL, 0, 1.3, 0)
     ]);
+    if (id === 'mace') return merge([
+      part(new THREE.CylinderGeometry(0.014, 0.016, 0.56, 8), WOOD, 0, 0.26, 0),
+      part(new THREE.SphereGeometry(0.05, 10, 8), DARK_STEEL, 0, 0.55, 0),
+      ...[0, 1, 2].map(i => part(new THREE.BoxGeometry(0.135, 0.09, 0.012), STEEL, 0, 0.55, 0, 0, i * Math.PI / 3, 0)),
+      part(new THREE.ConeGeometry(0.016, 0.05, 6), STEEL, 0, 0.625, 0)
+    ]);
+    if (id === 'halberd') return merge([
+      part(new THREE.CylinderGeometry(0.018, 0.018, 2.0, 8), WOOD, 0, 0.5, 0),
+      part(new THREE.BoxGeometry(0.2, 0.26, 0.012), STEEL, 0.11, 1.5, 0),
+      part(new THREE.BoxGeometry(0.06, 0.34, 0.012), STEEL, 0.2, 1.5, 0),
+      part(new THREE.ConeGeometry(0.03, 0.14, 4).rotateZ(Math.PI / 2), STEEL, -0.08, 1.5, 0, 0, 0, 0, 1, 1, 0.3),
+      part(new THREE.ConeGeometry(0.026, 0.3, 4).rotateY(Math.PI / 4), STEEL, 0, 1.64, 0, 0, 0, 0, 1, 1, 0.35)
+    ]);
     if (id === 'bow') { // senkrecht, Bauch nach vorne (+Z), Griff im Ursprung
       const R = 0.75, A = 1.5;
       const arc = new THREE.TorusGeometry(R, 0.013, 5, 18, A).rotateZ(-A / 2).rotateY(-Math.PI / 2).translate(0, 0, -R);
@@ -292,6 +329,7 @@ export function shieldGeo(kind, color) {
   });
 }
 export const SHIELD_R = { round: 0.3, heater: 0.31 };
+export const SHIELD_HP = { round: 70, heater: 120 }; // Haltbarkeit: Äxte und Hämmer zerschlagen Schilde
 
 // ---- Kämpfer zusammenbauen -------------------------------------------------------------------
 const pick = (a) => a[Math.floor(Math.random() * a.length)];

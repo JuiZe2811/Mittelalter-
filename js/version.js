@@ -1,2 +1,2 @@
 // Versionsnummer (wird mit tools/version.py gesetzt und im Spiel angezeigt)
-export const VERSION = '7';
+export const VERSION = '8';
