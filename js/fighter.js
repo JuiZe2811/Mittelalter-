@@ -26,21 +26,21 @@ const HELM_ARMOR = { none: 'none', hood: 'cloth', cap: 'helmCap', nasal: 'helmIr
 // parry/guard/dodge: Wahrscheinlichkeit zu parieren / den Schild richtig zu führen / auszuweichen
 // feint: Anteil Finten · aggro: Angriffslust · flee: Fluchtneigung, wenn es schlecht steht
 export const ENEMY_TYPES = {
-  bandit: { name: 'Räuber', hp: 70, smart: 0.3, arrowDodge: 0.35, speed: 0.95, weapons: ['dagger', 'club'], armor: { torso: 'cloth', arms: 'none', legs: 'cloth' }, helmets: ['hood', 'none', 'hood'],
+  bandit: { name: 'Räuber', hp: 70, balance: 40, smart: 0.3, arrowDodge: 0.35, speed: 0.95, weapons: ['dagger', 'club'], armor: { torso: 'cloth', arms: 'none', legs: 'cloth' }, helmets: ['hood', 'none', 'hood'],
     parry: 0.1, guard: 0, dodge: 0.35, feint: 0, aggro: 1.25, flee: 0.6, react: 0.3, tunic: [0x5a4a36, 0x4a5236, 0x5a3a2e, 0x3e3a34] },
-  soldier: { name: 'Söldner', hp: 95, smart: 0.7, arrowDodge: 0.3, speed: 0.82, weapons: ['sword', 'sword', 'mace'], armor: { torso: 'gambeson', arms: 'gambeson', legs: 'cloth' }, helmets: ['cap', 'nasal', 'none'],
+  soldier: { name: 'Söldner', hp: 95, balance: 55, smart: 0.7, arrowDodge: 0.3, speed: 0.82, weapons: ['sword', 'sword', 'mace'], armor: { torso: 'gambeson', arms: 'gambeson', legs: 'cloth' }, helmets: ['cap', 'nasal', 'none'],
     parry: 0.45, guard: 0, dodge: 0.1, feint: 0.2, aggro: 1, flee: 0.15, react: 0.22, tunic: [0x7a2a22, 0x2a3f6a, 0x3f5a2a] },
-  shield: { name: 'Schildträger', hp: 100, smart: 0.75, arrowDodge: 0, speed: 0.75, weapons: ['sword'], shield: 'round', armor: { torso: 'mail', arms: 'gambeson', legs: 'cloth' }, helmets: ['nasal'],
+  shield: { name: 'Schildträger', hp: 100, balance: 65, smart: 0.75, arrowDodge: 0, speed: 0.75, weapons: ['sword'], shield: 'round', armor: { torso: 'mail', arms: 'gambeson', legs: 'cloth' }, helmets: ['nasal'],
     parry: 0.08, guard: 0.75, dodge: 0, feint: 0.1, aggro: 0.9, flee: 0.1, react: 0.2, tunic: [0x7a2a22, 0x2a3f6a, 0x6a5a1a] },
-  spear: { name: 'Speerträger', hp: 85, smart: 0.6, arrowDodge: 0.25, speed: 0.8, weapons: ['spear'], armor: { torso: 'gambeson', arms: 'gambeson', legs: 'cloth' }, helmets: ['kettle'],
+  spear: { name: 'Speerträger', hp: 85, balance: 50, smart: 0.6, arrowDodge: 0.25, speed: 0.8, weapons: ['spear'], armor: { torso: 'gambeson', arms: 'gambeson', legs: 'cloth' }, helmets: ['kettle'],
     parry: 0.25, guard: 0, dodge: 0.2, feint: 0.15, aggro: 0.95, flee: 0.2, react: 0.24, tunic: [0x3f5a2a, 0x2a3f6a] },
-  axe: { name: 'Axtkämpfer', hp: 120, smart: 0.3, arrowDodge: 0.1, speed: 0.76, weapons: ['axe'], armor: { torso: 'leather', arms: 'none', legs: 'cloth' }, helmets: ['none'], beard: true,
+  axe: { name: 'Axtkämpfer', hp: 120, balance: 70, smart: 0.3, arrowDodge: 0.1, speed: 0.76, weapons: ['axe'], armor: { torso: 'leather', arms: 'none', legs: 'cloth' }, helmets: ['none'], beard: true,
     parry: 0.08, guard: 0, dodge: 0.05, feint: 0, aggro: 1.1, flee: 0, react: 0.3, tunic: [0x4a3020] },
-  archer: { name: 'Bogenschütze', hp: 60, smart: 0.6, arrowDodge: 0.4, speed: 0.9, weapons: ['bow'], armor: { torso: 'cloth', arms: 'cloth', legs: 'cloth' }, helmets: ['hood'],
+  archer: { name: 'Bogenschütze', hp: 60, balance: 35, smart: 0.6, arrowDodge: 0.4, speed: 0.9, weapons: ['bow'], armor: { torso: 'cloth', arms: 'cloth', legs: 'cloth' }, helmets: ['hood'],
     parry: 0.05, guard: 0, dodge: 0.3, feint: 0, aggro: 1, flee: 0.5, react: 0.3, tunic: [0x35502a, 0x4a4a2a] },
-  knight: { name: 'Ritter', hp: 130, smart: 0.9, arrowDodge: 0, speed: 0.62, weapons: ['sword', 'mace'], shield: 'heater', armor: { torso: 'plate', arms: 'plate', legs: 'mail' }, helmets: ['great'],
+  knight: { name: 'Ritter', hp: 130, balance: 90, smart: 0.9, arrowDodge: 0, speed: 0.62, weapons: ['sword', 'mace'], shield: 'heater', armor: { torso: 'plate', arms: 'plate', legs: 'mail' }, helmets: ['great'],
     parry: 0.3, guard: 0.9, dodge: 0, feint: 0.25, aggro: 0.9, flee: 0, react: 0.17, tunic: [0x8a1a1a, 0x1a2a7a, 0xd8d0b8] },
-  halberd: { name: 'Hellebardier', hp: 105, smart: 0.7, arrowDodge: 0.15, speed: 0.74, weapons: ['halberd'], armor: { torso: 'mail', arms: 'gambeson', legs: 'cloth' }, helmets: ['kettle'],
+  halberd: { name: 'Hellebardier', hp: 105, balance: 60, smart: 0.7, arrowDodge: 0.15, speed: 0.74, weapons: ['halberd'], armor: { torso: 'mail', arms: 'gambeson', legs: 'cloth' }, helmets: ['kettle'],
     parry: 0.3, guard: 0, dodge: 0.1, feint: 0.1, aggro: 0.95, flee: 0.1, react: 0.24, tunic: [0x6a5a1a, 0x7a2a22] }
 };
 export const TYPE_ORDER = ['bandit', 'soldier', 'shield', 'spear', 'halberd', 'axe', 'archer', 'knight'];

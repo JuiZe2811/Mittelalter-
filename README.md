@@ -118,6 +118,63 @@ Alles, was du in der Hand hältst, kannst du werfen: Lass es mitten im Schwung l
 - **Waffen der Gegner:** Lässt ein Gegner seine Waffe oder seinen Schild fallen (entwaffnet, Arm unbrauchbar, tot), liegt sie als echte Waffe am Boden. Du kannst sie aufheben, benutzen und werfen.
   - Keule wird zum Streitkolben, Hellebarde zum Speer.
 
+### Kampfsystem: Treffer, Paraden, Gleichgewicht
+
+**Treffer**
+- **Kontaktpunkt:** Gezählt wird die Geschwindigkeit genau an der Stelle, die trifft. Am Klingenansatz schneidet ein Schwert kaum, im vorderen Drittel voll.
+  - Gemessen: derselbe Schwung macht am Ansatz etwa ein Drittel des Schadens der Spitze.
+- **Art des Treffers:** Schneide, flache Seite (stumpf) oder Parierstange (stumpf).
+- **Kontinuierliche Prüfung:** Zwischen zwei Bildern wird die Klinge auf dem Bogen um die Hand geprüft, nicht auf einer geraden Linie. Auch sehr schnelle Hiebe oder ein ausgefallenes Bild gehen nicht durch Gegner hindurch.
+- **Ein Schwung:** Jeder Gegner wird je Schwung höchstens einmal getroffen. Ein Schwung kann aber mehrere Gegner nacheinander treffen.
+- **Konter:** Wer beim Ausholen, nach einem abgeprallten Schlag oder mit weggeschlagener Deckung getroffen wird, nimmt 20 % mehr Schaden.
+
+**Weitere Angriffe**
+- **Knaufschlag:** Ein Griffende, das kräftig voran gestoßen wird, trifft stumpf.
+- **Freie Hand:**
+  - Ein schneller Faustschlag trifft stumpf.
+  - Langsam gegen den Rumpf eines Gegners gedrückt schiebt sie ihn weg und kostet ihn Gleichgewicht.
+
+**Klinge an Klinge**
+- Die Waffe des Gegners ist immer im Weg, nicht nur wenn er pariert.
+- Ein kräftiger Schlag gegen seine Klinge schlägt sie zur Seite, er ist dann kurz offen.
+- Ein sehr harter Schlag gegen eine erschöpfte oder verletzte Hand entwaffnet ihn.
+- Treffen sich beide Waffen mitten im Schlag, prallen sie aufeinander.
+
+**Paraden**
+- Klinge nur hingehalten: Block. Er kostet Ausdauer, und deine Waffe wird zur Seite gedrückt.
+- Klinge dem Schlag entgegengeführt: Parade.
+- Schnell auf den Angreifer zu: **perfekte Parade**. Der Gegner ist lange offen, verliert Gleichgewicht und Ausdauer und kann die Waffe verlieren.
+- Den Schild dem Schlag entgegenstoßen: **Schild-Parade**.
+
+**Gleichgewicht der Gegner**
+- Jeder Treffer kostet Standfestigkeit. Stumpfe Schläge, Beintreffer und Treffer mitten im Angriff kosten mehr.
+- Ist sie aufgebraucht, taumelt der Gegner lange oder fällt.
+- Sie erholt sich, wenn er nicht mehr getroffen wird.
+
+**Ausdauer der Gegner**
+- Angriffe, Blocks und weggeschlagene Klingen kosten Ausdauer.
+- Erschöpfte Gegner greifen langsamer an, decken schlechter, lassen den Schild sinken und keuchen sichtbar.
+
+**Treffer-Reaktionen**
+- Der Körper reagiert auf die Richtung des Treffers: Von vorne knickt er zurück, von der Seite dreht er sich weg.
+- Am Arm zuckt der Arm zurück. Am Bein knickt er ein und kippt zur Seite.
+
+**Entwaffnet**
+- Ein entwaffneter Gegner läuft zur nächsten Waffe am Boden und hebt sie auf, oft deine eigene.
+- Liegt keine in der Nähe, zieht er einen Ersatzdolch oder kämpft mit den Fäusten.
+
+**Verwundet:** Unter halbem Leben kämpfen Gegner vorsichtiger. Sie halten mehr Abstand, decken öfter und greifen seltener an.
+
+**Deine Ausdauer (⚡ am Handgelenk)**
+- Blocks kosten Ausdauer, perfekte Paraden fast nichts, Treffer ein wenig. Schwingen allein kostet nichts.
+- Bist du erschöpft (unter 15), triffst du schwächer.
+- Unter 8 werden deine Blocks durchgeschlagen.
+- Die Ausdauer kommt nach einer Sekunde Pause schnell zurück.
+
+**Controller-Ausfall:**
+- Verliert die Brille einen Controller kurz aus dem Blick, bleibt die Waffe stehen. Beim Wiederfinden gibt es keinen Schein-Treffer.
+- Nach dem Neu-Zentrieren (Oculus-Taste) wird die Bodenhöhe neu angewandt, und du bekommst einen Hinweis.
+
 ### Taktik der Gegner
 
 Die Gegner sprechen sich ab und reagieren auf das, was du tust:

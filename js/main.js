@@ -1,16 +1,16 @@
 import * as THREE from 'three';
-import { VERSION } from './version.js?v=9';
+import { VERSION } from './version.js?v=10';
 import { ARButton } from 'three/addons/webxr/ARButton.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { makePanel, panelBg, roundRect } from './util.js?v=9';
-import { SFX, SFX_PLAYER, ensureAudio, setListener, setVolumes, setAudioPaused } from './sfx.js?v=9';
-import { segPoint } from './geom.js?v=9';
-import { stepPhysics, addDynamic, removeDynamic, localBoxOf } from './physics.js?v=9';
-import { initEnemies, spawnEnemy, updateEnemies, clearEnemies, prepareNav, aliveCount, enemies, strikeTest, applyHit, shoveEnemy, hitShield, teamOpening, notifyShot, player, opts as combatOpts, pickType, ENEMY_TYPES, TYPE_ORDER, warmupGroup } from './enemies.js?v=9';
-import { groundAt } from './nav.js?v=9';
-import { WEAPON_ORDER, WEAPONS, createWeapon, setBowString, setXbowString, xbowPull, initWeapons, shootArrow, throwWeapon, updateFlying, clearFlying } from './weapons.js?v=9';
-import { room, addWall, addBox, makeWall, makeBox, rotateBox, removeSurface, clearRoom, setEditMode, suggestYaw, surfacesOf, importDetectedPlanes, saveRoom, loadRoom, hasSavedRoom, surfaceName, serializeRoom, deserializeRoom, roomSlots, saveRoomSlot, loadRoomSlot, addOpening, makeOpening, roomOccluders, setAtmosphere, closeRoomGaps, closeRoom, openWallEnds } from './room.js?v=9';
-import { initEffects, headRef, floatingText, updateEffects, updateDebris, fx, clearDebris, sparks, warmText, burst } from './effects.js?v=9';
+import { makePanel, panelBg, roundRect } from './util.js?v=10';
+import { SFX, SFX_PLAYER, ensureAudio, setListener, setVolumes, setAudioPaused } from './sfx.js?v=10';
+import { segPoint } from './geom.js?v=10';
+import { stepPhysics, addDynamic, removeDynamic, localBoxOf } from './physics.js?v=10';
+import { initEnemies, spawnEnemy, updateEnemies, clearEnemies, prepareNav, aliveCount, enemies, strikeTest, applyHit, shoveEnemy, hitShield, teamOpening, notifyShot, beatWeapon, pushEnemy, player, opts as combatOpts, pickType, ENEMY_TYPES, TYPE_ORDER, warmupGroup } from './enemies.js?v=10';
+import { groundAt } from './nav.js?v=10';
+import { WEAPON_ORDER, WEAPONS, createWeapon, setBowString, setXbowString, xbowPull, initWeapons, shootArrow, throwWeapon, updateFlying, clearFlying } from './weapons.js?v=10';
+import { room, addWall, addBox, makeWall, makeBox, rotateBox, removeSurface, clearRoom, setEditMode, suggestYaw, surfacesOf, importDetectedPlanes, saveRoom, loadRoom, hasSavedRoom, surfaceName, serializeRoom, deserializeRoom, roomSlots, saveRoomSlot, loadRoomSlot, addOpening, makeOpening, roomOccluders, setAtmosphere, closeRoomGaps, closeRoom, openWallEnds } from './room.js?v=10';
+import { initEffects, headRef, floatingText, updateEffects, updateDebris, fx, clearDebris, sparks, warmText, burst } from './effects.js?v=10';
 const clamp = THREE.MathUtils.clamp;
 const hyp = (a, b, c = 0) => Math.sqrt(a * a + b * b + c * c); // schneller als Math.hypot und ohne Speicher-Müll
 
@@ -155,6 +155,7 @@ function readInputs() {
     for (const [k, idx] of Object.entries(BTN)) h.btn[k] = !!(gp && gp.buttons[idx] && gp.buttons[idx].pressed);
     h.stickX = gp && gp.axes.length > 3 ? gp.axes[2] : 0;
     h.stickY = gp && gp.axes.length > 3 ? gp.axes[3] : 0;
+    if (!h.ray.visible && !h.grip.visible) { h.hist.length = 0; h.velHist.length = 0; h.vel.set(0, 0, 0); h.prevFist = null; continue; } // Tracking verloren
     handPoint(h, h.point);
     h.tip.setFromMatrixPosition(h.ray.matrixWorld);
     h.ray.getWorldQuaternion(h.quat);
@@ -1237,6 +1238,7 @@ function takeWeapon(w, h) {
   w.holder = h;
   h.held = w;
   w.slide = 0; w.smoothQ = null; w.root.scale.setScalar(1);
+  w.gripMode = w.def.melee && hasGrip(h) ? 'grip' : 'ray';
   if (w.grip2) { // Stielwaffe: die Hand bleibt dort am Schaft, wo sie zugegriffen hat
     w.root.updateMatrixWorld(true);
     const ax = w.gb.clone().sub(w.ga).normalize(), L = w.root.worldToLocal(h.point.clone()), t = L.dot(ax);
@@ -1291,58 +1293,169 @@ function bladeState(w, dt) {
   const pb = w.prevBase, pt = w.prevTip;
   w.prevBase = base; w.prevTip = tip;
   w.gA = w.root.localToWorld(w.ga.clone()); w.gB = w.root.localToWorld(w.gb.clone()); // ganzer Schaft/ganze Klinge: fängt Schläge ab
-  if (!pt || dt <= 0) { w.tipSpeed = 0; w.tipVel.set(0, 0, 0); return null; }
+  if (!pt || dt <= 0 || w.lost) { w.tipSpeed = 0; w.tipVel.set(0, 0, 0); w.lost = false; return null; }
   w.tipVel.copy(tip).sub(pt).divideScalar(dt);
   w.tipSpeed = w.tipVel.length();
+  (w.baseVel || (w.baseVel = new THREE.Vector3())).copy(base).sub(pb).divideScalar(dt);
   return { base, tip, pb, pt };
+}
+// Ein Schwung beginnt, wenn die Klinge nach einer Ruhephase wieder schnell wird. Innerhalb eines Schwungs
+// trifft sie jeden Gegner höchstens einmal – kann aber mehrere Gegner nacheinander treffen.
+function swingTrack(w, dt) {
+  const slow = w.tipSpeed < w.def.melee.minSpeed * 0.6;
+  w.slowT = slow ? (w.slowT || 0) + dt : 0;
+  if (w.slowT > 0.08 || !w.swingHits) { w.swingHits = new Set(); w.swingBlocked = false; }
+}
+const _cv = new THREE.Vector3();
+// Vektor a→b auf dem Bogen überblenden (Richtung kugelförmig, Länge linear)
+const _pv = new THREE.Vector3(), _d0 = new THREE.Vector3(), _d1 = new THREE.Vector3(), _sq = new THREE.Quaternion(), _u0 = new THREE.Vector3(), _u1 = new THREE.Vector3();
+function slerpLen(a, b, k, out) {
+  const la = a.length(), lb = b.length();
+  if (la < 1e-5 || lb < 1e-5) return out.lerpVectors(a, b, k);
+  _u0.copy(a).divideScalar(la); _u1.copy(b).divideScalar(lb);
+  if (_u0.dot(_u1) < -0.98) return out.lerpVectors(a, b, k);
+  _sq.setFromUnitVectors(_u0, _u1);
+  return out.copy(_u0).applyQuaternion(_sq.identity().slerp(_sq.setFromUnitVectors(_u0, _u1), k)).multiplyScalar(la + (lb - la) * k);
 }
 function meleeUpdate(w, dt, h) {
   const s = bladeState(w, dt);
-  if (!s || state === 'setup' || elapsed < w.spentUntil) return;
+  const pivPrev = w.prevPivot; w.prevPivot = w.root.position.clone(); w.prevPiv = pivPrev;
+  if (!s || state === 'setup') return;
   if (w.tipSpeed > 28) return; // Tracking-Sprung (Controller kurz verloren): kein Hieb
+  swingTrack(w, dt);
+  pommelStrike(w, dt, h);
+  if (w.swingBlocked) return; // dieser Schwung wurde schon abgefangen
   const M = w.def.melee, kind = M.kind;
   const axis = s.tip.clone().sub(s.base).normalize();
-  const along = w.tipVel.dot(axis), baseAlong = s.base.clone().sub(s.pb).divideScalar(dt).dot(axis);
+  const along = w.tipVel.dot(axis), baseAlong = w.baseVel.dot(axis);
   // Bewegung entlang der Klinge/des Schafts = Stich (nur Klingen und Speer)
   const thrust = (kind === 'blade' || kind === 'spear') && along > 0.9 && baseAlong > 0.6 && along > w.tipSpeed * 0.72;
   if (!thrust && w.tipSpeed < M.minSpeed) return; // langsames Hineinhalten zählt nicht
-  // Bahn seit dem letzten Bild in kleinen Schritten prüfen (schnelle Hiebe überspringen sonst Schild/Körper)
-  const n = clamp(Math.ceil(s.tip.distanceTo(s.pt) / 0.05), 1, 8);
+  // Bahn seit dem letzten Bild in kleinen Schritten prüfen (kontinuierliche Kollision: schnelle Hiebe gehen nicht hindurch)
+  // Zwischenstellungen auf dem Bogen um die Hand (nicht geradlinig) – sonst „schneidet“ ein schneller Hieb die Kurve ab
+  const piv0 = w.prevPiv || w.root.position, piv1 = w.root.position;
+  const n = clamp(Math.ceil(s.tip.distanceTo(s.pt) / 0.04), 1, 10);
   let hit = null;
-  for (let i = 1; i <= n && !hit; i++) hit = strikeTest(_mb.lerpVectors(s.pb, s.base, i / n), _mt.lerpVectors(s.pt, s.tip, i / n), kind === 'blunt' ? 0.04 : 0.012);
+  for (let i = 1; i <= n; i++) {
+    const k = i / n;
+    _pv.lerpVectors(piv0, piv1, k);
+    _d0.subVectors(s.pb, piv0); _d1.subVectors(s.base, piv1); slerpLen(_d0, _d1, k, _mb).add(_pv);
+    _d0.subVectors(s.pt, piv0); _d1.subVectors(s.tip, piv1); slerpLen(_d0, _d1, k, _mt).add(_pv);
+    hit = strikeTest(_mb, _mt, kind === 'blunt' ? 0.04 : 0.012);
+    if (hit && (hit.kind !== 'body' || !w.swingHits.has(hit.e))) break;
+    hit = null;
+  }
   if (!hit) return;
-  w.spentUntil = elapsed + 0.38; // der Schwung ist verbraucht
-  if (hit.kind !== 'body') { enemyBlocked(hit, h, M.shield || 3); kickWeapon(w, 0.3); return; }
+  // Geschwindigkeit genau am Kontaktpunkt: nahe am Griff trifft es viel schwächer als mit der Spitze
+  const u = clamp(hit.point.clone().sub(s.base).dot(axis) / Math.max(0.05, s.tip.distanceTo(s.base)), 0, 1);
+  _cv.lerpVectors(w.baseVel, w.tipVel, u);
+  const cSpeed = _cv.length();
   const two = w.twoHand ? 1 : 0, grip = w.def.needTwo && !two ? 0.6 : 1; // Kriegshammer einhändig: schwach
-  const sp = clamp(w.tipSpeed / 3.2, 0.45, 1.7);
+  const tired = player.stam < 15 ? 0.75 : 1;                            // erschöpft: schwächere Treffer
+  const sp = clamp(cSpeed / 3.2, 0.3, 1.7);
   let type, power, flat = false;
   if (thrust) { type = 'thrust'; power = M.thrust * clamp(along / 1.8, 0.6, 1.6) * (1 + 0.2 * two); }
   else if (kind === 'blunt') { type = 'blunt'; power = M.blunt * sp * (1 + 0.25 * two) * grip; }
   else if (kind === 'spear') { type = 'slash'; power = M.slash * sp; } // quer mit der Speerspitze: schwach
   else {
-    type = 'slash';
-    const perp = w.tipVel.clone().addScaledVector(axis, -along);
+    const perp = _cv.clone().addScaledVector(axis, -_cv.dot(axis));
     const edge = w.edge.clone().transformDirection(w.root.matrixWorld);
     const align = perp.lengthSq() > 1e-6 ? Math.abs(perp.normalize().dot(edge)) : 1; // 1 = Schneide voran, 0 = flache Seite
     flat = align < 0.45;
-    power = M.slash * sp * (0.5 + 0.5 * align) * (1 + 0.3 * two);
+    type = flat || u < 0.12 ? 'blunt' : 'slash'; // flache Seite oder Parierstange: stumpfer Treffer
+    power = M.slash * sp * (flat ? 0.45 : 0.55 + 0.45 * align) * (1 + 0.3 * two);
+    if (kind === 'blade') power *= 0.35 + 0.65 * Math.min(1, u / 0.6); // Hebel: am Klingenansatz (Forte) schneidet es kaum, im vorderen Drittel voll
   }
-  const r = applyHit(hit.e, hit.zone, { type, power, pen: M.pen || 0, knockdown: !!M.knock && !!two && sp > 0.85, dir: w.tipVel.clone().normalize(), point: hit.point, knock: w.def.mass > 1.3 ? 1.2 : 0.5 });
+  power *= tired;
+  const dir = (cSpeed > 0.1 ? _cv.clone() : w.tipVel.clone()).normalize();
+  if (hit.kind !== 'body') { // Schild oder Waffe des Gegners im Weg: der Schwung ist abgefangen
+    w.swingBlocked = true;
+    enemyBlocked(hit, h, (M.shield || 3) * sp, power, dir, w);
+    kickWeapon(w, 0.3);
+    return;
+  }
+  w.swingHits.add(hit.e);
+  const r = applyHit(hit.e, hit.zone, { type, power, pen: flat ? 0 : M.pen || 0, knockdown: !!M.knock && !!two && sp > 0.85, dir, point: hit.point, knock: w.def.mass > 1.3 ? 1.2 : 0.5 });
   onEnemyHit(hit, r, { type, flat });
   kickWeapon(w, r.armor ? 0.22 : 0.08);
-  if (h) pulse(h, r.killed ? 1 : r.armor ? 0.9 : 0.7, r.killed ? 100 : 55);
+  if (h) pulse(h, r.killed ? 1 : r.armor ? 0.9 : 0.4 + 0.4 * sp / 1.7, r.killed ? 100 : 55);
   if (w.second) pulse(w.second, 0.6, 50);
+  useStamina(power > 30 ? 4 : 2);
 }
+// Knaufschlag: Griffende kräftig nach hinten/vorne gestoßen trifft stumpf (Schwert, Dolch, Stielwaffen)
+const _pm = new THREE.Vector3();
+function pommelStrike(w, dt, h) {
+  if (!w.grip2) return;
+  const p = w.root.localToWorld(_pm.copy(w.grip2).multiplyScalar(w.def.melee.kind === 'blade' ? 1.25 : 1));
+  const prev = w.prevPommel;
+  w.prevPommel = p.clone();
+  if (!prev || w.swingBlocked) return;
+  const v = p.clone().sub(prev).divideScalar(dt), speed = v.length();
+  if (speed < 2.2) return;
+  const back = w.tip.clone().sub(w.base).normalize().transformDirection(w.root.matrixWorld).negate();
+  if (v.dot(back) < speed * 0.5) return; // nur wenn der Knauf voran geht
+  const hit = strikeTest(prev, p, 0.03);
+  if (!hit || w.swingHits.has(hit.e)) return;
+  w.swingHits.add(hit.e);
+  if (hit.kind !== 'body') { enemyBlocked(hit, h, 2, 8, v.clone().normalize(), w); w.swingBlocked = true; return; }
+  const r = applyHit(hit.e, hit.zone, { type: 'blunt', power: 11 * clamp(speed / 3, 0.6, 1.6), dir: v.clone().normalize(), point: hit.point, knock: 1 });
+  onEnemyHit(hit, r, { type: 'blunt' });
+  if (settings.popups && !r.killed && !r.notes.length) floatingText('Knaufschlag!', hit.point.clone().add(new THREE.Vector3(0, 0.2, 0)), '#ffd36a');
+  if (h) pulse(h, 0.8, 50);
+}
+// Freie Hand: Faustschlag (schnell) oder Wegdrücken (langsam gegen den Körper des Gegners)
+const _fh = new THREE.Vector3();
+function freeHandUpdate(h, dt) {
+  const prev = h.prevFist;
+  h.prevFist = h.point.clone();
+  if (!prev || h.held || h.drawing || h.grip2 || h.pull || state === 'setup' || dt <= 0) return;
+  const v = _fh.subVectors(h.point, prev).divideScalar(dt), speed = v.length();
+  if (speed > 25) return;
+  if (speed > 2.4) { // Faustschlag
+    if (elapsed < (h.fistReady || 0)) return;
+    const hit = strikeTest(prev, h.point, 0.05);
+    if (!hit) return;
+    h.fistReady = elapsed + 0.35;
+    if (hit.kind !== 'body') { SFX.thud(0.5); pulse(h, 1, 60); playerHit({ dmg: 2, zone: 'arm', type: 'blunt', name: 'Faust gegen Stahl' }); return; }
+    const r = applyHit(hit.e, hit.zone, { type: 'blunt', power: 7 * clamp(speed / 3, 0.7, 1.6), dir: v.clone().normalize(), point: hit.point, knock: 1.2 });
+    onEnemyHit(hit, r, { type: 'blunt' });
+    pulse(h, 0.9, 60);
+    useStamina(3);
+  } else if (speed > 0.25) { // Wegdrücken: Hand am Rumpf des Gegners und in seine Richtung bewegt
+    for (const e of enemies) {
+      if (e.state !== 'fight' || e.down) continue;
+      const c = e.torso.localToWorld(_pm.set(0, 0.25, 0));
+      if (c.distanceTo(h.point) > 0.24) continue;
+      const toE = c.clone().sub(h.point).setY(0).normalize();
+      const push = v.clone().setY(0).dot(toE);
+      if (push > 0.2) { pushEnemy(e, toE, push * dt); if ((frameNo & 3) === 0) pulse(h, 0.3, 20); }
+    }
+  }
+}
+// Ausdauer des Spielers: Blocks und Treffer kosten etwas; sie kommt schnell zurück
+function useStamina(n) { player.stam = Math.max(0, player.stam - n); staminaT = 1.0; }
+let staminaT = 0;
 // Der Gegner hat mit Schild oder Klinge abgefangen
-function enemyBlocked(hit, h, shieldDmg = 3) {
+function enemyBlocked(hit, h, shieldDmg = 3, power = 10, dir = null, w = null) {
   SFX.clang();
   sparks(hit.point, tmpV.subVectors(headPos, hit.point).normalize(), 8);
   if (h) pulse(h, 1, 80);
-  // Schild nimmt Schaden – Äxte und Hämmer zertrümmern ihn
-  const broke = hit.kind === 'shield' && hitShield(hit.e, shieldDmg, hit.point);
-  if (!broke && settings.popups) floatingText(hit.kind === 'shield' ? (shieldDmg >= 20 ? 'Schild splittert!' : 'Schild!') : 'Pariert!', hit.point.clone().add(new THREE.Vector3(0, 0.2, 0)), '#cfd8e3');
-  if (hit.e.cool > 0.25 && Math.random() < 0.6) hit.e.cool = 0.25; // er nutzt die Gelegenheit zum Gegenangriff …
-  teamOpening(hit.e);                                              // … und seine Verbündeten ebenfalls
+  let text = null, color = '#cfd8e3';
+  if (hit.kind === 'weapon') { // Klinge an Klinge: Waffe des Gegners wegschlagen, oder es prallt ab
+    const res = beatWeapon(hit.e, power, dir || tmpV2.subVectors(hit.point, headPos).normalize());
+    if (res === 'disarmed') { text = 'Entwaffnet!'; color = '#7dffa8'; }
+    else if (res === 'beaten') { text = 'Klinge weggeschlagen!'; color = '#7dffa8'; }
+    else if (res === 'clash') text = 'Klingen prallen aufeinander';
+    else { text = 'Abgelenkt'; if (w) kickWeapon(w, 0.35); }
+    useStamina(3);
+  } else {
+    // Schild nimmt Schaden – Äxte und Hämmer zertrümmern ihn
+    const broke = hit.kind === 'shield' && hitShield(hit.e, shieldDmg, hit.point);
+    if (!broke) text = hit.kind === 'shield' ? (shieldDmg >= 20 ? 'Schild splittert!' : 'Schild!') : 'Pariert!';
+    if (hit.e.cool > 0.25 && Math.random() < 0.6) hit.e.cool = 0.25; // er nutzt die Gelegenheit zum Gegenangriff …
+    teamOpening(hit.e);                                              // … und seine Verbündeten ebenfalls
+  }
+  if (text && settings.popups) floatingText(text, hit.point.clone().add(new THREE.Vector3(0, 0.2, 0)), color);
 }
 // Treffer-Rückmeldung (Nahkampf, Pfeil, Wurf, Schildstoß)
 function onEnemyHit(hit, r, info = {}) {
@@ -1487,13 +1600,18 @@ function playerBlocked(info) {
   const w = info.w, h = w && w.holder;
   const n = tmpV.subVectors(headPos, info.point).normalize();
   kickWeapon(w, info.how === 'weak' ? 0.4 : 0.25);
-  if (info.how === 'shield') { SFX.clang(); SFX.thud(0.5); sparks(info.point, n, 10); pulse(h, info.heavy ? 1 : 0.85, info.heavy ? 150 : 90); }
-  else if (info.how === 'parry') {
-    SFX.clang(); SFX.pin(); sparks(info.point, n, 14); pulse(h, 1, 70);
-    if (settings.popups) floatingText('Parade!', info.point.clone().add(new THREE.Vector3(0, 0.15, 0)), '#7dffa8');
-  } else if (info.how === 'block') { SFX.clang(); sparks(info.point, n, 6); pulse(h, 0.75, 60); }
+  const pw = info.power || 12;
+  if (info.how === 'shield') {
+    SFX.clang(); SFX.thud(0.5); sparks(info.point, n, 10); pulse(h, info.heavy ? 1 : 0.85, info.heavy ? 150 : 90);
+    useStamina(info.perfect ? 2 : pw * (info.heavy ? 0.9 : 0.6));
+    if (info.perfect && settings.popups) floatingText('Schild-Parade!', info.point.clone().add(new THREE.Vector3(0, 0.15, 0)), '#7dffa8');
+  } else if (info.how === 'parry') {
+    SFX.clang(); SFX.pin(); sparks(info.point, n, info.perfect ? 22 : 14); pulse(h, 1, info.perfect ? 110 : 70);
+    useStamina(info.perfect ? 0 : pw * 0.35);
+    if (settings.popups) floatingText(info.perfect ? 'Perfekte Parade!' : 'Parade!', info.point.clone().add(new THREE.Vector3(0, 0.15, 0)), '#7dffa8');
+  } else if (info.how === 'block') { SFX.clang(); sparks(info.point, n, 6); pulse(h, 0.75, 60); useStamina(pw * 0.8); kickWeapon(w, 0.4); }
   else if (info.how === 'weak') {
-    SFX.clang(); SFX.thud(0.6); pulse(h, 1, 140);
+    SFX.clang(); SFX.thud(0.6); pulse(h, 1, 140); useStamina(pw);
     if (settings.popups) floatingText('Durchgeschlagen!', info.point.clone().add(new THREE.Vector3(0, 0.15, 0)), '#ffb04a');
   } else if (info.how === 'deflect') { SFX.clang(); sparks(info.point, n, 6); pulse(h, 0.7, 40); }
   else if (info.how === 'kicked') { // Tritt gegen den Schild: er deckt einen Moment lang nicht
@@ -1555,6 +1673,8 @@ function updatePlayer(dt) {
   if (state !== 'playing' && state !== 'menu') return;
   regenT -= dt;
   if (regenT <= 0 && playerHp < 100) playerHp = Math.min(100, playerHp + dt * 3);
+  staminaT -= dt;
+  if (staminaT <= 0) player.stam = Math.min(100, player.stam + dt * 22);
   if (state === 'playing' && playerHp < 35) { heartT -= dt; if (heartT <= 0) { heartT = 0.9; SFX_PLAYER.heartbeat(); } }
 }
 
@@ -1569,7 +1689,7 @@ function updateHud() {
   const show = state === 'playing' || settings.fps;
   if (prof.lastDt > 0) fpsEma += (1 / prof.lastDt - fpsEma) * 0.05;
   if (Math.abs(fpsEma - fpsShown) >= 1) fpsShown = Math.round(fpsEma);
-  const txt = `❤ ${Math.ceil(playerHp)}   ⚔ ${kills}` + (settings.fps ? `   ${fpsShown} fps` : '');
+  const txt = `❤ ${Math.ceil(playerHp)}  ⚡ ${Math.round(player.stam)}  ⚔ ${kills}` + (settings.fps ? `  ${fpsShown} fps` : '');
   if (!renderer.xr.isPresenting) {
     statusEl.style.display = show || enemies.length ? 'block' : 'none';
     statusEl.textContent = `${txt}\n${deskW ? deskW.def.icon + ' ' + deskW.def.name : 'keine Waffe'}${deskShield ? ' + 🛡 Schild' : ''}\n1–9, 0 Waffen · Klick Hieb/Schlag · E Stich · Leertaste Deckung · F werfen · Q Waffen-Menü`;
@@ -1594,14 +1714,18 @@ function updateHud() {
 const _hm = new THREE.Matrix4(), _hr = new THREE.Matrix4(), _hp = new THREE.Vector3(), _hq = new THREE.Quaternion(), _ax = new THREE.Vector3();
 function holdTarget(w, h) {
   const ang = THREE.MathUtils.degToRad(settings.gripAngle || 0);
-  if (w.def.melee && hasGrip(h)) _hm.copy(h.grip.matrixWorld).multiply(_hr.makeRotationX(-w.tilt0 + ang));
+  // Der Raum (Handfläche oder Zeigestrahl) wird beim Greifen festgelegt – fällt er kurz aus, bleibt die Waffe stehen
+  const useGrip = w.gripMode === 'grip';
+  if (useGrip ? !h.grip.visible : !h.ray.visible) { w.lost = true; return false; }
+  if (w.def.melee && useGrip) _hm.copy(h.grip.matrixWorld).multiply(_hr.makeRotationX(-w.tilt0 + ang));
   else { _hm.multiplyMatrices(h.ray.matrixWorld, HOLD_OFFSET); if (w.def.melee && ang) _hm.multiply(_hr.makeRotationX(ang)); }
   if (w.slide) { _ax.copy(w.gb).sub(w.ga).normalize().multiplyScalar(-w.slide); _hm.multiply(_hr.makeTranslation(_ax.x, _ax.y, _ax.z)); }
   _hm.decompose(_hp, _hq, tmpS);
+  return true;
 }
 function poseHeld(w, dt) {
   const h = w.holder;
-  holdTarget(w, h);
+  if (!holdTarget(w, h)) { w.prevTip = w.prevBase = w.prevPommel = null; return; }
   // Gewicht: schwere Waffen folgen der Drehung der Hand etwas träge (beidhändig doppelt so schnell)
   const wt = settings.weight * (w.def.melee ? 1 : 0.4);
   if (wt > 0 && w.smoothQ && dt > 0) {
@@ -1684,7 +1808,7 @@ function updateWeapons(dt) {
     }
     hideTrail(w);
   }
-  for (const h of hands) if (h.drawing) bowUpdate(h);
+  for (const h of hands) { if (h.drawing) bowUpdate(h); if (h.src) freeHandUpdate(h, dt); }
   // Pull: Waffe fliegt per Laser + Griff-Taste in die Hand
   for (const h of hands) {
     if (!h.pull) continue;
@@ -1696,6 +1820,13 @@ function updateWeapons(dt) {
     if (w.root.position.distanceTo(h.point) < 0.15) { h.pull = null; takeWeapon(w, h); }
   }
 }
+// Waffen am Boden, die ein entwaffneter Gegner aufheben kann (nicht gehaltene, nicht fliegende)
+const FLOOR_IDS = { sword: 'sword', dagger: 'dagger', mace: 'mace', axe: 'axe', spear: 'spear' };
+player.floorWeapons = () => arsenal.filter(w => FLOOR_IDS[w.id] && w.phys && !w.holder && !w.thrown).map(w => ({
+  id: FLOOR_IDS[w.id], pos: w.root.position,
+  valid: () => arsenal.includes(w) && !!w.phys && !w.holder,
+  take: () => { if (!arsenal.includes(w) || w.holder) return false; removeWeapon(w); return true; }
+}));
 // Waffen der Gegner, die zu Boden fallen, werden zu Waffen, die du aufheben kannst
 const DROP_MAP = { sword: 'sword', dagger: 'dagger', mace: 'mace', club: 'mace', axe: 'axe', spear: 'spear', halberd: 'spear', bow: 'bow', shield: 'shield' };
 player.dropped = (item, obj, vel) => {
@@ -1934,10 +2065,10 @@ function deskStrike(w) { // Treffer-Moment des PC-Schwungs
   const R = w.deskRay, M = w.def.melee, kind = M.kind;
   const hit = strikeTest(R.o.clone().addScaledVector(R.d, 0.25), R.o.clone().addScaledVector(R.d, w.def.reach), kind === 'blunt' || w.id === 'sword' ? 0.06 : 0.04, true);
   if (!hit) return;
-  if (hit.kind !== 'body') { enemyBlocked(hit, null, M.shield || 3); return; }
   const thrust = kind === 'spear' || (kind === 'blade' && w.deskThrust);
   const type = thrust ? 'thrust' : kind === 'blunt' ? 'blunt' : 'slash';
-  const power = (thrust ? M.thrust : kind === 'blunt' ? M.blunt * (w.def.needTwo ? 1.25 : 1) : M.slash) * 1.1; // am PC gilt der Hammer als beidhändig geführt
+  const power = (thrust ? M.thrust : kind === 'blunt' ? M.blunt * (w.def.needTwo ? 1.25 : 1) : M.slash) * 1.1 * (player.stam < 15 ? 0.75 : 1); // am PC gilt der Hammer als beidhändig geführt
+  if (hit.kind !== 'body') { enemyBlocked(hit, null, M.shield || 3, power, R.d.clone(), w); return; }
   const r = applyHit(hit.e, hit.zone, { type, power, pen: M.pen || 0, knockdown: !!M.knock, dir: R.d.clone(), point: hit.point, knock: w.def.mass > 1.3 ? 1.2 : 0.5 });
   onEnemyHit(hit, r, { type });
 }
@@ -2082,6 +2213,13 @@ renderer.xr.addEventListener('sessionstart', () => {
   for (const w of arsenal) { freeWeapon(w); w.root.visible = false; w.floating = false; }
   room.desktop = false;
   baseRefSpace = renderer.xr.getReferenceSpace();
+  // Neu zentriert (Oculus-Taste lang gedrückt): Ursprung springt – Bodenhöhe neu anwenden, keine Schein-Treffer
+  if (baseRefSpace && baseRefSpace.addEventListener) baseRefSpace.addEventListener('reset', () => {
+    applyFloorOffset();
+    for (const w of arsenal) w.lost = true;
+    for (const h of hands) { h.hist.length = 0; h.velHist.length = 0; h.prevFist = null; }
+    later(0.3, () => floatingText('Ansicht neu zentriert – passt der Raum nicht mehr: Raum einrichten → Ausrichten', inFront(1.2, 0, headPos.y), '#ffd36a'));
+  });
   applyFloorOffset();
   clearRoom();
   setup.autoImport = 4;
