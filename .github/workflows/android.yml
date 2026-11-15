@@ -1,0 +1,41 @@
+name: Android APK
+on:
+  push:
+    paths:
+      - 'burgenkrieg/index.html'
+      - 'burgenkrieg-android/**'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Spiel in die App einbetten
+        run: |
+          mkdir -p burgenkrieg-android/app/src/main/assets
+          cp burgenkrieg/index.html burgenkrieg-android/app/src/main/assets/index.html
+      - name: APK bauen
+        working-directory: burgenkrieg-android
+        run: gradle assembleDebug --no-daemon
+      - name: APK bereitstellen
+        run: cp burgenkrieg-android/app/build/outputs/apk/debug/app-debug.apk Burgenkrieg.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Burgenkrieg-APK
+          path: Burgenkrieg.apk
+      - name: Release aktualisieren
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete apk-latest --cleanup-tag --yes || true
+          gh release create apk-latest Burgenkrieg.apk --target "$GITHUB_SHA" --title "Burgenkrieg APK (neueste Version)" --notes "Direkt auf dem Android-Handy herunterladen und installieren."
